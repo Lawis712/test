@@ -1,5 +1,5 @@
 /**
- * SillyTavern Persona Groups (用户人设分组)
+ * tttest
  * Copyright (C) 2026  Lavi
  *
  * This program is free software: you can redistribute it and/or modify
@@ -25,9 +25,9 @@ import { extension_settings } from '../../../extensions.js';
 import { eventSource, event_types, saveSettingsDebounced } from '../../../../script.js';
 import { power_user } from '../../../power-user.js';
 
-const EXT_NAME = 'Persona Groups';
-const EXT_DISPLAY = '用户人设分组';
-const KEY = 'persona_groups';
+const EXT_NAME = 'tttest';
+const EXT_DISPLAY = 'tttest';
+const KEY = 'persona_groups_test';
 const TOOLBAR_ID = 'pg-toolbar-container';
 const PAGER_ID = 'pg-pager';
 const BTN_ID = 'pg-quick-btn';
