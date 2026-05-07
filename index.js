@@ -1,5 +1,5 @@
 /**
- * tttest
+ * SillyTavern Persona Groups (用户人设分组)
  * Copyright (C) 2026  Lavi
  *
  * This program is free software: you can redistribute it and/or modify
@@ -25,15 +25,14 @@ import { extension_settings } from '../../../extensions.js';
 import { eventSource, event_types, saveSettingsDebounced } from '../../../../script.js';
 import { power_user } from '../../../power-user.js';
 
-const EXT_NAME = 'tttest';
-const EXT_DISPLAY = 'tttest';
-const KEY = 'persona_groups_test';
+const EXT_NAME = 'Persona Groups';
+const EXT_DISPLAY = '用户人设分组';
+const KEY = 'persona_groups';
 const TOOLBAR_ID = 'pg-toolbar-container';
 const PAGER_ID = 'pg-pager';
 const BTN_ID = 'pg-quick-btn';
 const POPUP_ID = 'pg-quick-popup';
 const SETTINGS_ID = 'pg-extension-settings';
-const VARIANT_POPUP_ID = 'pg-variant-popup';
 
 // ========== 存储 ==========
 function initStorage() {
@@ -41,10 +40,11 @@ function initStorage() {
         extension_settings[KEY] = {
             groups: [],
             pageSize: 20,
-            version: 3,
+            version: 2,
             groupsHidden: false,
             quickEnabled: true,
-            mergeEnabled: false,
+            mergeByName: false,
+            expandedClusters: [],
         };
         saveSettingsDebounced();
     }
@@ -52,7 +52,8 @@ function initStorage() {
     if (!extension_settings[KEY].pageSize) extension_settings[KEY].pageSize = 20;
     if (typeof extension_settings[KEY].groupsHidden !== 'boolean') extension_settings[KEY].groupsHidden = false;
     if (typeof extension_settings[KEY].quickEnabled !== 'boolean') extension_settings[KEY].quickEnabled = true;
-    if (typeof extension_settings[KEY].mergeEnabled !== 'boolean') extension_settings[KEY].mergeEnabled = false;
+    if (typeof extension_settings[KEY].mergeByName !== 'boolean') extension_settings[KEY].mergeByName = false;
+    if (!Array.isArray(extension_settings[KEY].expandedClusters)) extension_settings[KEY].expandedClusters = [];
     saveSettingsDebounced();
 }
 function getGroups() { return extension_settings[KEY].groups; }
@@ -62,8 +63,20 @@ function isGroupsHidden() { return !!extension_settings[KEY].groupsHidden; }
 function setGroupsHidden(v) { extension_settings[KEY].groupsHidden = !!v; saveSettingsDebounced(); }
 function isQuickEnabled() { return !!extension_settings[KEY].quickEnabled; }
 function setQuickEnabled(v) { extension_settings[KEY].quickEnabled = !!v; saveSettingsDebounced(); }
-function isMergeEnabled() { return !!extension_settings[KEY].mergeEnabled; }
-function setMergeEnabled(v) { extension_settings[KEY].mergeEnabled = !!v; saveSettingsDebounced(); }
+function isMergeByName() { return !!extension_settings[KEY].mergeByName; }
+function setMergeByName(v) { extension_settings[KEY].mergeByName = !!v; saveSettingsDebounced(); }
+function getExpandedClusters() {
+    if (!Array.isArray(extension_settings[KEY].expandedClusters)) extension_settings[KEY].expandedClusters = [];
+    return extension_settings[KEY].expandedClusters;
+}
+function isClusterExpanded(name) { return getExpandedClusters().includes(name); }
+function toggleClusterExpand(name) {
+    const arr = getExpandedClusters();
+    const i = arr.indexOf(name);
+    if (i >= 0) arr.splice(i, 1);
+    else arr.push(name);
+    saveSettingsDebounced();
+}
 function saveGroups() { saveSettingsDebounced(); }
 function createGroup(name) {
     const id = 'g_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
@@ -134,13 +147,13 @@ function getName(a) {
 }
 function getTitle(a) {
     const desc = (power_user.persona_descriptions || {})[a];
-    if (!desc || typeof desc.title !== 'string') return '';
-    return desc.title.trim();
+    if (desc && typeof desc.title === 'string') return desc.title.trim();
+    return '';
 }
 function getDescription(a) {
     const desc = (power_user.persona_descriptions || {})[a];
-    if (!desc || typeof desc.description !== 'string') return '';
-    return desc.description;
+    if (desc && typeof desc.description === 'string') return desc.description;
+    return '';
 }
 function getAvatarUrl(a) { return '/thumbnail?type=persona&file=' + encodeURIComponent(a); }
 function isBound(a) {
@@ -177,60 +190,29 @@ function isStQuickPersonaEnabled() {
     return !!(qp && qp.enabled === true);
 }
 
-// ========== U（Unit / 同名合并单元） ==========
+// ========== 同名簇 ==========
 /**
- * 决定 U 标识 —— 按 persona name 聚合
- * 返回：[{ key, name, variants: [avatar...], representative: avatar }]
+ * 把一组 avatars 按 name 分簇。
+ * 返回 { clusters: [{name, avatars: [a, a, ...]}], avatarToCluster: Map<avatar, clusterRef> }
+ * 簇内 avatars 顺序 = 输入顺序
+ * clusters 顺序 = 每个簇首次出现的顺序
  */
-function buildUnits(avatarList) {
-    const map = new Map();
-    for (const a of avatarList) {
+function buildClusters(avatars) {
+    const map = new Map(); // name -> cluster
+    const clusters = [];
+    const avatarToCluster = new Map();
+    for (const a of avatars) {
         const name = getName(a);
-        const key = name; // 用名字本身做 key
-        if (!map.has(key)) map.set(key, { key, name, variants: [] });
-        map.get(key).variants.push(a);
+        let c = map.get(name);
+        if (!c) {
+            c = { name, avatars: [] };
+            map.set(name, c);
+            clusters.push(c);
+        }
+        c.avatars.push(a);
+        avatarToCluster.set(a, c);
     }
-    // 决定每个 U 的代表变体（用于卡片显示）：
-    // 优先级：当前选中 > 第一个绑定 > 第一个变体
-    const units = [];
-    for (const u of map.values()) {
-        let rep = u.variants.find(a => isCurrent(a));
-        if (!rep) rep = u.variants.find(a => isBound(a));
-        if (!rep) rep = u.variants[0];
-        u.representative = rep;
-        units.push(u);
-    }
-    return units;
-}
-
-function isUnitBound(u) {
-    return u.variants.some(a => isBound(a));
-}
-function unitBoundCount(u) {
-    return u.variants.filter(a => isBound(a)).length;
-}
-function isUnitCurrent(u) {
-    return u.variants.some(a => isCurrent(a));
-}
-/** U 是否匹配搜索关键词（搜 name + 所有变体的 title） */
-function unitMatchesSearch(u, query) {
-    if (!query) return true;
-    const q = query.toLowerCase();
-    if (u.name.toLowerCase().includes(q)) return true;
-    for (const a of u.variants) {
-        const t = getTitle(a);
-        if (t && t.toLowerCase().includes(q)) return true;
-    }
-    return false;
-}
-/** 单个 avatar 是否匹配搜索（搜 name + title） */
-function avatarMatchesSearch(a, query) {
-    if (!query) return true;
-    const q = query.toLowerCase();
-    if (getName(a).toLowerCase().includes(q)) return true;
-    const t = getTitle(a);
-    if (t && t.toLowerCase().includes(q)) return true;
-    return false;
+    return { clusters, avatarToCluster };
 }
 
 // ========== ST API ==========
@@ -303,14 +285,12 @@ function initExtensionSettings() {
                         <small class="pg-setting-hint" id="pg-setting-quick-hint" style="display:none; opacity:0.7; margin-top:4px; font-style:italic;"></small>
                     </div>
                     <div class="pg-setting-row" style="margin-top:10px;">
-                        <label class="checkbox_label" for="pg-setting-merge-enabled">
-                            <input type="checkbox" id="pg-setting-merge-enabled">
-                            <span>合并同名人设（在主面板里把同名 U 显示为一张卡，点击后可切换具体内容）</span>
+                        <label class="checkbox_label" for="pg-setting-merge-byname">
+                            <input type="checkbox" id="pg-setting-merge-byname">
+                            <span>合并同名人设（同名折叠为一张卡，展开后切换变体）</span>
                         </label>
-                        <small style="opacity:0.7; margin-top:4px; font-style:italic; display:block;">
-                            适合喜欢用同一角色名、但有多套不同设定/描述的玩法。<br>
-                            合并仅作用于主面板的展示层，底层数据不受影响；输入栏旁边的快捷弹窗不合并。<br>
-                            多选模式下会自动按"变体"展示以便精确选择。
+                        <small class="pg-setting-hint" style="opacity:0.7; margin-top:4px; font-style:italic; display:block;">
+                            适合"同一个角色，多套设定"的玩法。仅影响位置1（管理面板）。多选模式下自动展平。
                         </small>
                     </div>
                 </div>
@@ -321,7 +301,7 @@ function initExtensionSettings() {
 
     const $cb = $panel.find('#pg-setting-quick-enabled');
     const $hint = $panel.find('#pg-setting-quick-hint');
-    const $merge = $panel.find('#pg-setting-merge-enabled');
+    const $mb = $panel.find('#pg-setting-merge-byname');
 
     function updateUI() {
         const enabled = isQuickEnabled();
@@ -334,7 +314,7 @@ function initExtensionSettings() {
             $cb.prop('disabled', false);
             $hint.hide();
         }
-        $merge.prop('checked', isMergeEnabled());
+        $mb.prop('checked', isMergeByName());
     }
 
     $cb.on('change', function () {
@@ -347,10 +327,9 @@ function initExtensionSettings() {
         }
     });
 
-    $merge.on('change', function () {
+    $mb.on('change', function () {
         const v = $(this).prop('checked');
-        setMergeEnabled(v);
-        state.page = 0;
+        setMergeByName(v);
         refreshMain();
     });
 
@@ -436,7 +415,7 @@ function renderToolbar() {
     const t = document.getElementById(TOOLBAR_ID);
     if (!t) return;
     const hidden = isGroupsHidden();
-    const merge = isMergeEnabled();
+    const merge = isMergeByName();
 
     const currentGroupId = getFilterGroupId();
     if (currentGroupId && !getGroups().find(g => g.id === currentGroupId)) {
@@ -463,7 +442,7 @@ function renderToolbar() {
     html += '<button class="menu_button pg-btn-newgroup" title="新建分组"><i class="fa-solid fa-folder-plus"></i></button>';
     html += '<button class="menu_button pg-btn-selectmode' + (state.selectMode?' pg-active':'') + '" title="多选模式"><i class="fa-solid fa-check-double"></i></button>';
     html += '<button class="menu_button pg-btn-toggle-groups' + (hidden?' pg-active':'') + '" title="' + (hidden?'显示分组':'隐藏分组') + '"><i class="fa-solid ' + (hidden?'fa-eye-slash':'fa-eye') + '"></i></button>';
-    html += '<button class="menu_button pg-btn-toggle-merge' + (merge?' pg-active':'') + '" title="' + (merge?'当前: 合并同名 (点击关闭)':'当前: 不合并 (点击合并同名)') + '"><i class="fa-solid ' + (merge?'fa-object-group':'fa-object-ungroup') + '"></i></button>';
+    html += '<button class="menu_button pg-btn-toggle-merge' + (merge?' pg-active':'') + '" title="' + (merge?'展开同名':'合并同名') + '"><i class="fa-solid ' + (merge?'fa-layer-group':'fa-object-ungroup') + '"></i></button>';
     html += '</div>';
 
     if (state.selectMode) {
@@ -476,9 +455,11 @@ function renderToolbar() {
         html += '<button class="menu_button pg-btn-clear-sel">清空</button>';
         html += '</div>';
     }
+
     if (merge && !state.selectMode) {
-        html += '<div class="pg-merge-hint">合并同名模式：相同名字的人设已合并为一张卡片，点击卡片可切换具体内容。多选模式下会自动展开为变体。</div>';
+        html += '<div class="pg-merge-hint">📚 已开启同名合并：相同名字的人设折叠为一张卡，点右上角徽章 <span class="pg-merge-hint-badge">×N</span> 展开变体</div>';
     }
+
     t.innerHTML = html;
     bindToolbar(t);
 }
@@ -501,7 +482,7 @@ function bindToolbar(t) {
     });
     const tm = t.querySelector('.pg-btn-toggle-merge');
     if (tm) tm.addEventListener('click', () => {
-        setMergeEnabled(!isMergeEnabled());
+        setMergeByName(!isMergeByName());
         state.page = 0;
         refreshMain();
     });
@@ -562,10 +543,27 @@ function renderPager(totalPages) {
 }
 
 /**
- * 是否启用"U 合并"视图（合并开关 ON 且不在多选模式）
+ * 在合并模式下，对一个 avatar 列表做"簇折叠"：
+ * 输入：[a1, a2, a3, a4]（其中 a1, a3 同名）
+ * 输出：[a1, a2, a4] —— 同名簇只保留代表（第一个）
  */
-function isMergeViewActive() {
-    return isMergeEnabled() && !state.selectMode;
+function collapseToRepresentatives(avatars) {
+    const seen = new Set();
+    const out = [];
+    for (const a of avatars) {
+        const name = getName(a);
+        if (seen.has(name)) continue;
+        seen.add(name);
+        out.push(a);
+    }
+    return out;
+}
+
+/**
+ * 拿到名字下的所有变体（按 allAvatars 中的顺序）
+ */
+function getVariantsOfName(name, allAvatars) {
+    return allAvatars.filter(a => getName(a) === name);
 }
 
 async function reorganizeNative() {
@@ -579,28 +577,34 @@ async function reorganizeNative() {
         await refreshValidAvatars();
     }
 
+    if (state.search.trim()) {
+        // 搜索模式：完全展开（不合并），由 ST 原生搜索决定显示
+        isReorganizing = true;
+        try {
+            cleanupCustomDom(block);
+            block.querySelectorAll(':scope > .avatar-container').forEach(c => {
+                c.style.display = '';
+            });
+            applySelectModeUI();
+            const pager = document.getElementById(PAGER_ID);
+            if (pager) pager.style.display = 'none';
+        } finally {
+            requestAnimationFrame(() => {
+                isReorganizing = false;
+                if (scrollContainer && savedScrollTop > 0) {
+                    scrollContainer.scrollTop = savedScrollTop;
+                }
+            });
+        }
+        return;
+    }
+
     const pager = document.getElementById(PAGER_ID);
     if (pager) pager.style.display = '';
 
     isReorganizing = true;
     try {
-        // 清理上次的分组容器（把里面的 avatar-container 还原回 block）
-        block.querySelectorAll(':scope > .pg-group-wrapper').forEach(w => {
-            const body = w.querySelector('.pg-group-body');
-            if (body) {
-                Array.from(body.children).forEach(child => {
-                    if (child.classList.contains('avatar-container')) {
-                        block.appendChild(child);
-                    }
-                });
-            }
-            w.remove();
-        });
-        block.querySelectorAll(':scope > .pg-empty-hint').forEach(el => el.remove());
-        // 清理上次的 U 卡片
-        block.querySelectorAll(':scope > .pg-unit-card').forEach(el => el.remove());
-        // 关闭已打开的变体弹窗
-        closeVariantPopup();
+        cleanupCustomDom(block);
 
         await ensureAllCardsInDom();
 
@@ -610,33 +614,27 @@ async function reorganizeNative() {
             const id = getCardAvatarId(c);
             if (id && isValidAvatar(id) && !cardMap.has(id)) cardMap.set(id, c);
         }
-        // 默认全部隐藏，需要展示的才 display = ''
         allCards.forEach(c => c.style.display = 'none');
 
         const filterGroupId = getFilterGroupId();
         const isFilteringByGroup = !!filterGroupId;
         const hidden = isGroupsHidden();
-        const mergeView = isMergeViewActive();
-        const searchQuery = state.search.trim();
-        const hasSearch = !!searchQuery;
+        // 多选模式下强制展平，方便精确选择
+        const merge = isMergeByName() && !state.selectMode;
 
-        // ===== 单变体筛选（搜索/绑定） =====
-        const passFilterAvatar = (avatar) => {
-            if (!isFilteringByGroup) {
-                if (state.filter === 'bound' && !isBound(avatar)) return false;
-                if (state.filter === 'unbound' && isBound(avatar)) return false;
-            }
-            if (hasSearch && !avatarMatchesSearch(avatar, searchQuery)) return false;
+        // 单 avatar 是否通过筛选
+        const passFilter = (avatar) => {
+            if (isFilteringByGroup) return true;
+            if (state.filter === 'bound' && !isBound(avatar)) return false;
+            if (state.filter === 'unbound' && isBound(avatar)) return false;
             return true;
         };
 
-        // ===== U 维度筛选 =====
-        const passFilterUnit = (u) => {
-            if (!isFilteringByGroup) {
-                if (state.filter === 'bound' && !isUnitBound(u)) return false;
-                if (state.filter === 'unbound' && isUnitBound(u)) return false;
-            }
-            if (hasSearch && !unitMatchesSearch(u, searchQuery)) return false;
+        // 簇是否通过筛选（已绑定=任一变体已绑定；未绑定=全部未绑定）
+        const passFilterCluster = (avatars) => {
+            if (isFilteringByGroup) return true;
+            if (state.filter === 'bound') return avatars.some(isBound);
+            if (state.filter === 'unbound') return avatars.every(a => !isBound(a));
             return true;
         };
 
@@ -644,183 +642,153 @@ async function reorganizeNative() {
         const groupedSet = new Set();
         for (const g of groups) g.personas.forEach(a => groupedSet.add(a));
         const allAvatars = getAllAvatars().filter(a => cardMap.has(a));
+        const ungroupedAvatars = allAvatars.filter(a => !groupedSet.has(a));
 
-        // 容器：放 U 卡片用（不污染 block 的 avatar-container 集合）
-        // 我们把 U 卡片直接 append 到 block，但用 .pg-unit-card 类标识
-
+        let pageItemsForDisplay = []; // 仅用于"未分组区"的分页展示，存的是要显示的代表 avatar
         let totalPages = 1;
 
-        // 一个统一的辅助：把"一个变体或一个 U"渲染成 DOM 节点并显示在某个父容器里
-        // 普通模式渲染单个 avatar 卡：
-        const showAvatarCard = (avatar, parent) => {
-            const card = cardMap.get(avatar);
-            if (!card) return;
-            card.style.display = '';
-            parent.appendChild(card);
-        };
-        // 合并模式渲染 U 卡：
-        const showUnitCard = (u, parent) => {
-            const card = buildUnitCard(u);
-            parent.appendChild(card);
-        };
-
         if (isFilteringByGroup) {
-            // 按分组筛选：列出分组内的 personas（按变体或按 U）
+            // 单分组筛选：在该分组内做合并/分页
             const targetGroup = groups.find(g => g.id === filterGroupId);
-            const groupAvatars = targetGroup
+            let groupAvatars = targetGroup
                 ? targetGroup.personas.filter(a => cardMap.has(a))
                 : [];
 
-            if (mergeView) {
-                // 合并：把分组内的 avatars 聚合成 U（按 name），但变体只保留分组内的
-                const units = buildUnits(groupAvatars).filter(passFilterUnit);
-                const pageSize = getPageSize();
-                totalPages = Math.max(1, Math.ceil(units.length / pageSize));
-                if (state.page >= totalPages) state.page = totalPages - 1;
-                if (state.page < 0) state.page = 0;
-                const start = state.page * pageSize;
-                const pageUnits = units.slice(start, start + pageSize);
-                for (const u of pageUnits) showUnitCard(u, block);
-            } else {
-                const filtered = groupAvatars.filter(passFilterAvatar);
-                const pageSize = getPageSize();
-                totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-                if (state.page >= totalPages) state.page = totalPages - 1;
-                if (state.page < 0) state.page = 0;
-                const start = state.page * pageSize;
-                const pageItems = filtered.slice(start, start + pageSize);
-                for (const a of pageItems) showAvatarCard(a, block);
+            if (merge) {
+                // 合并：把组内同名的折叠成代表，但变体仅取本组内的
+                groupAvatars = collapseToRepresentatives(groupAvatars);
             }
+
+            const pageSize = getPageSize();
+            totalPages = Math.max(1, Math.ceil(groupAvatars.length / pageSize));
+            if (state.page >= totalPages) state.page = totalPages - 1;
+            if (state.page < 0) state.page = 0;
+            const start = state.page * pageSize;
+            pageItemsForDisplay = groupAvatars.slice(start, start + pageSize);
         } else {
-            // 非分组筛选：根据 mergeView/hidden/search 决定
-            if (mergeView) {
-                // ============= 合并视图 =============
-                // 注意：分组里存的是 avatar 文件名。
-                // 一个 U 的变体可能分散在不同分组里。
-                // 设计：只要 U 的"任意一个变体"在某分组内，该 U 就显示在该分组下；
-                // 如果 U 的所有变体都未分组，归到"未分组"区。
-                const allUnits = buildUnits(allAvatars);
-
-                // 给每个 U 标记：所属的分组 ids（可能多个）
-                const unitGroupIds = new Map(); // unit.key -> Set<gid>
-                for (const u of allUnits) {
-                    const set = new Set();
-                    for (const a of u.variants) {
-                        for (const g of groups) {
-                            if (g.personas.includes(a)) set.add(g.id);
-                        }
-                    }
-                    unitGroupIds.set(u.key, set);
-                }
-
-                const ungroupedUnits = allUnits.filter(u => unitGroupIds.get(u.key).size === 0);
-                const ungroupedUnitsFiltered = ungroupedUnits.filter(passFilterUnit);
-
-                const pageSize = getPageSize();
-                totalPages = Math.max(1, Math.ceil(ungroupedUnitsFiltered.length / pageSize));
-                if (state.page >= totalPages) state.page = totalPages - 1;
-                if (state.page < 0) state.page = 0;
-                const start = state.page * pageSize;
-                const pageUnits = ungroupedUnitsFiltered.slice(start, start + pageSize);
-
-                if (!hidden) {
-                    const fragmentsToPrepend = [];
-                    for (const g of groups) {
-                        const unitsInGroup = allUnits.filter(u => unitGroupIds.get(u.key).has(g.id));
-                        const visibleUnits = unitsInGroup.filter(passFilterUnit);
-                        const totalUnitsInGroup = unitsInGroup.length;
-                        if (totalUnitsInGroup > 0 && visibleUnits.length === 0) continue;
-
-                        const wrapper = document.createElement('div');
-                        wrapper.className = 'pg-group-wrapper' + (g.collapsed ? ' pg-collapsed' : '');
-                        if (totalUnitsInGroup === 0) wrapper.classList.add('pg-empty');
-                        wrapper.dataset.gid = g.id;
-
-                        const header = document.createElement('div');
-                        header.className = 'pg-group-header';
-                        const countText = totalUnitsInGroup === 0 ? '空' : visibleUnits.length;
-                        header.innerHTML =
-                            '<i class="fa-solid fa-chevron-down pg-toggle"></i>' +
-                            '<span class="pg-group-name">' + esc(g.name) + '</span>' +
-                            '<span class="pg-group-count">' + countText + '</span>' +
-                            '<div class="pg-group-actions">' +
-                            '<i class="fa-solid fa-pen pg-btn-rename" title="重命名"></i>' +
-                            '<i class="fa-solid fa-trash pg-btn-delgroup" title="删除分组"></i>' +
-                            '</div>';
-                        wrapper.appendChild(header);
-
-                        const body = document.createElement('div');
-                        body.className = 'pg-group-body';
-                        if (!g.collapsed && totalUnitsInGroup > 0) {
-                            for (const u of visibleUnits) showUnitCard(u, body);
-                        } else if (!g.collapsed && totalUnitsInGroup === 0) {
-                            body.innerHTML = '<div class="pg-empty-hint">暂无人设，请用多选模式将人设移入此分组</div>';
-                        }
-                        wrapper.appendChild(body);
-                        fragmentsToPrepend.push(wrapper);
-                    }
-                    for (let i = fragmentsToPrepend.length - 1; i >= 0; i--) {
-                        block.insertBefore(fragmentsToPrepend[i], block.firstChild);
-                    }
-                }
-
-                for (const u of pageUnits) showUnitCard(u, block);
+            // 全局视图：未分组区 + 各分组区
+            let ungroupedFiltered;
+            if (merge) {
+                // 合并：先按名字分簇，整簇通过筛选才显示，并以代表展示
+                const reps = collapseToRepresentatives(ungroupedAvatars);
+                ungroupedFiltered = reps.filter(rep => {
+                    const name = getName(rep);
+                    const variants = getVariantsOfName(name, ungroupedAvatars);
+                    return passFilterCluster(variants);
+                });
             } else {
-                // ============= 普通视图（按变体） =============
-                const ungroupedAvatars = allAvatars.filter(a => !groupedSet.has(a));
-                const ungroupedFiltered = ungroupedAvatars.filter(passFilterAvatar);
-                const pageSize = getPageSize();
-                totalPages = Math.max(1, Math.ceil(ungroupedFiltered.length / pageSize));
-                if (state.page >= totalPages) state.page = totalPages - 1;
-                if (state.page < 0) state.page = 0;
-                const start = state.page * pageSize;
-                const pageItems = ungroupedFiltered.slice(start, start + pageSize);
+                ungroupedFiltered = ungroupedAvatars.filter(passFilter);
+            }
+            const pageSize = getPageSize();
+            totalPages = Math.max(1, Math.ceil(ungroupedFiltered.length / pageSize));
+            if (state.page >= totalPages) state.page = totalPages - 1;
+            if (state.page < 0) state.page = 0;
+            const start = state.page * pageSize;
+            pageItemsForDisplay = ungroupedFiltered.slice(start, start + pageSize);
 
-                if (!hidden) {
-                    const fragmentsToPrepend = [];
-                    for (const g of groups) {
-                        const visibleInGroup = g.personas.filter(a => cardMap.has(a) && passFilterAvatar(a));
-                        const totalPersonasInGroup = g.personas.filter(a => cardMap.has(a)).length;
-                        if (totalPersonasInGroup > 0 && visibleInGroup.length === 0) continue;
+            if (!hidden) {
+                const fragmentsToPrepend = [];
+                for (const g of groups) {
+                    let groupCards = g.personas.filter(a => cardMap.has(a));
+                    const totalPersonasInGroup = groupCards.length;
 
-                        const wrapper = document.createElement('div');
-                        wrapper.className = 'pg-group-wrapper' + (g.collapsed ? ' pg-collapsed' : '');
-                        if (totalPersonasInGroup === 0) wrapper.classList.add('pg-empty');
-                        wrapper.dataset.gid = g.id;
+                    let visibleItems; // 通过筛选后真正要显示的 "代表 avatar" 列表（合并模式）或普通 avatar 列表
+                    if (merge) {
+                        const reps = collapseToRepresentatives(groupCards);
+                        visibleItems = reps.filter(rep => {
+                            const name = getName(rep);
+                            const variants = getVariantsOfName(name, groupCards);
+                            return passFilterCluster(variants);
+                        });
+                    } else {
+                        visibleItems = groupCards.filter(passFilter);
+                    }
 
-                        const header = document.createElement('div');
-                        header.className = 'pg-group-header';
-                        const countText = totalPersonasInGroup === 0 ? '空' : visibleInGroup.length;
-                        header.innerHTML =
-                            '<i class="fa-solid fa-chevron-down pg-toggle"></i>' +
-                            '<span class="pg-group-name">' + esc(g.name) + '</span>' +
-                            '<span class="pg-group-count">' + countText + '</span>' +
-                            '<div class="pg-group-actions">' +
-                            '<i class="fa-solid fa-pen pg-btn-rename" title="重命名"></i>' +
-                            '<i class="fa-solid fa-trash pg-btn-delgroup" title="删除分组"></i>' +
-                            '</div>';
-                        wrapper.appendChild(header);
+                    if (totalPersonasInGroup > 0 && visibleItems.length === 0) continue;
 
-                        const body = document.createElement('div');
-                        body.className = 'pg-group-body';
-                        if (!g.collapsed && totalPersonasInGroup > 0) {
-                            for (const a of g.personas) {
-                                if (cardMap.has(a) && passFilterAvatar(a)) {
-                                    showAvatarCard(a, body);
+                    const wrapper = document.createElement('div');
+                    wrapper.className = 'pg-group-wrapper' + (g.collapsed ? ' pg-collapsed' : '');
+                    if (totalPersonasInGroup === 0) wrapper.classList.add('pg-empty');
+                    wrapper.dataset.gid = g.id;
+
+                    const header = document.createElement('div');
+                    header.className = 'pg-group-header';
+                    const countText = totalPersonasInGroup === 0 ? '空' : visibleItems.length;
+                    header.innerHTML =
+                        '<i class="fa-solid fa-chevron-down pg-toggle"></i>' +
+                        '<span class="pg-group-name">' + esc(g.name) + '</span>' +
+                        '<span class="pg-group-count">' + countText + '</span>' +
+                        '<div class="pg-group-actions">' +
+                        '<i class="fa-solid fa-pen pg-btn-rename" title="重命名"></i>' +
+                        '<i class="fa-solid fa-trash pg-btn-delgroup" title="删除分组"></i>' +
+                        '</div>';
+                    wrapper.appendChild(header);
+
+                    const body = document.createElement('div');
+                    body.className = 'pg-group-body';
+                    if (!g.collapsed && totalPersonasInGroup > 0) {
+                        for (const rep of visibleItems) {
+                            const card = cardMap.get(rep);
+                            if (!card) continue;
+                            card.style.display = '';
+                            body.appendChild(card);
+
+                            if (merge) {
+                                const name = getName(rep);
+                                const variants = getVariantsOfName(name, groupCards);
+                                if (variants.length > 1) {
+                                    decorateRepresentative(card, name, variants.length);
+                                    if (isClusterExpanded(name)) {
+                                        const drawer = buildVariantDrawer(name, variants, cardMap);
+                                        body.appendChild(drawer);
+                                    }
+                                } else {
+                                    undecorateRepresentative(card);
                                 }
+                            } else {
+                                undecorateRepresentative(card);
                             }
-                        } else if (!g.collapsed && totalPersonasInGroup === 0) {
-                            body.innerHTML = '<div class="pg-empty-hint">暂无人设，请用多选模式将人设移入此分组</div>';
                         }
-                        wrapper.appendChild(body);
-                        fragmentsToPrepend.push(wrapper);
+                    } else if (!g.collapsed && totalPersonasInGroup === 0) {
+                        body.innerHTML = '<div class="pg-empty-hint">暂无人设，请用多选模式将人设移入此分组</div>';
                     }
-                    for (let i = fragmentsToPrepend.length - 1; i >= 0; i--) {
-                        block.insertBefore(fragmentsToPrepend[i], block.firstChild);
-                    }
+                    wrapper.appendChild(body);
+                    fragmentsToPrepend.push(wrapper);
                 }
+                for (let i = fragmentsToPrepend.length - 1; i >= 0; i--) {
+                    block.insertBefore(fragmentsToPrepend[i], block.firstChild);
+                }
+            }
+        }
 
-                for (const a of pageItems) showAvatarCard(a, block);
+        // 渲染未分组区（或筛选分组的当前页）
+        for (const rep of pageItemsForDisplay) {
+            const card = cardMap.get(rep);
+            if (!card) continue;
+            card.style.display = '';
+            block.appendChild(card);
+
+            if (merge) {
+                const name = getName(rep);
+                let scope;
+                if (isFilteringByGroup) {
+                    const targetGroup = groups.find(g => g.id === filterGroupId);
+                    scope = targetGroup ? targetGroup.personas.filter(a => cardMap.has(a)) : [];
+                } else {
+                    scope = ungroupedAvatars;
+                }
+                const variants = getVariantsOfName(name, scope);
+                if (variants.length > 1) {
+                    decorateRepresentative(card, name, variants.length);
+                    if (isClusterExpanded(name)) {
+                        const drawer = buildVariantDrawer(name, variants, cardMap);
+                        block.appendChild(drawer);
+                    }
+                } else {
+                    undecorateRepresentative(card);
+                }
+            } else {
+                undecorateRepresentative(card);
             }
         }
 
@@ -838,156 +806,109 @@ async function reorganizeNative() {
 }
 
 /**
- * 构建一个 U 卡片元素
+ * 把所有自定义 DOM（分组容器、变体抽屉、提示）拆掉，把卡片放回 block 顶层。
  */
-function buildUnitCard(u) {
-    const rep = u.representative;
-    const card = document.createElement('div');
-    card.className = 'pg-unit-card avatar-container interactable';
-    card.dataset.unitKey = u.key;
-    card.dataset.avatarId = rep; // 让 ST 内部可能的查询找到一个实变体（兜底）
-    card.tabIndex = 0;
-
-    const variantCount = u.variants.length;
-    const boundCount = unitBoundCount(u);
-    const current = isUnitCurrent(u);
-    if (current) card.classList.add('selected');
-
-    const repTitle = getTitle(rep);
-    const displayName = getName(rep);
-    const repDesc = getDescription(rep);
-
-    const titleHtml = repTitle
-        ? '<small class="ch_additional_info">' + esc(repTitle) + '</small>'
-        : '';
-
-    const variantBadge = variantCount > 1
-        ? '<span class="pg-unit-badge" title="这个角色有 ' + variantCount + ' 套设定">×' + variantCount + '</span>'
-        : '';
-    const boundBadge = (boundCount > 0 && variantCount > 1)
-        ? '<span class="pg-unit-bound-badge" title="' + boundCount + '/' + variantCount + ' 个变体已绑定">' + boundCount + '/' + variantCount + ' 🔒</span>'
-        : '';
-
-    card.innerHTML =
-        '<div class="avatar" data-avatar-id="' + esc(rep) + '" title="' + esc(rep) + '">' +
-            '<img src="' + getAvatarUrl(rep) + '" alt="' + esc(displayName) + '">' +
-            variantBadge +
-        '</div>' +
-        '<div class="flex-container wide100pLess70px character_select_container">' +
-            '<div class="wide100p character_name_block">' +
-                '<span class="ch_name flex1">' + esc(displayName) + '</span>' +
-                titleHtml +
-            '</div>' +
-            '<div class="ch_description">' + esc(repDesc || '[点击切换设定]') + '</div>' +
-            '<div class="avatar_container_states buttons_block">' +
-                boundBadge +
-            '</div>' +
-        '</div>';
-
-    card.addEventListener('click', (e) => {
-        if (state.selectMode) return; // 多选下不该出现 U 卡，但兜底
-        e.preventDefault();
-        e.stopPropagation();
-        if (variantCount === 1) {
-            // 只有一个变体，直接切
-            switchPersona(u.variants[0]);
-        } else {
-            openVariantPopup(card, u);
+function cleanupCustomDom(block) {
+    block.querySelectorAll(':scope > .pg-group-wrapper').forEach(w => {
+        const body = w.querySelector('.pg-group-body');
+        if (body) {
+            Array.from(body.children).forEach(child => {
+                if (child.classList.contains('avatar-container')) {
+                    block.appendChild(child);
+                }
+            });
         }
+        w.remove();
     });
-
-    return card;
+    block.querySelectorAll(':scope > .pg-empty-hint').forEach(el => el.remove());
+    block.querySelectorAll('.pg-variant-drawer').forEach(el => el.remove());
+    // 清掉残留的徽章
+    block.querySelectorAll('.pg-cluster-badge').forEach(el => el.remove());
+    block.querySelectorAll('.avatar-container.pg-cluster-rep').forEach(c => c.classList.remove('pg-cluster-rep', 'pg-cluster-expanded'));
 }
 
-// ========== 变体选择弹窗 ==========
-function closeVariantPopup() {
-    const p = document.getElementById(VARIANT_POPUP_ID);
-    if (p) p.remove();
-    if (window.__pg_variant_outside) {
-        document.removeEventListener('click', window.__pg_variant_outside, true);
-        window.__pg_variant_outside = null;
+/**
+ * 给代表卡加 "× N" 徽章
+ */
+function decorateRepresentative(card, name, count) {
+    card.classList.add('pg-cluster-rep');
+    if (isClusterExpanded(name)) card.classList.add('pg-cluster-expanded');
+    else card.classList.remove('pg-cluster-expanded');
+
+    let badge = card.querySelector(':scope > .pg-cluster-badge');
+    if (!badge) {
+        badge = document.createElement('div');
+        badge.className = 'pg-cluster-badge';
+        badge.title = '展开 / 收起 同名变体';
+        card.appendChild(badge);
     }
-}
+    badge.dataset.cname = name;
+    badge.innerHTML = '<i class="fa-solid fa-layer-group"></i><span>×' + count + '</span>';
 
-function openVariantPopup(anchorCard, u) {
-    closeVariantPopup();
-    const popup = document.createElement('div');
-    popup.id = VARIANT_POPUP_ID;
-    popup.className = 'pg-variant-popup';
-
-    let html = '<div class="pg-variant-header">' +
-                   '<span>切换 “' + esc(u.name) + '” 的设定</span>' +
-                   '<i class="fa-solid fa-xmark pg-variant-close" title="关闭"></i>' +
-               '</div>';
-    html += '<div class="pg-variant-list">';
-    for (const a of u.variants) {
-        const t = getTitle(a) || '（无备注）';
-        const cur = isCurrent(a);
-        const bound = isBound(a);
-        html += '<div class="pg-variant-item' + (cur ? ' pg-current' : '') + '" data-avatar="' + esc(a) + '">' +
-                    '<img src="' + getAvatarUrl(a) + '" alt="">' +
-                    '<div class="pg-variant-meta">' +
-                        '<div class="pg-variant-title">' + esc(t) + (cur ? ' <span class="pg-variant-tag pg-tag-cur">当前</span>' : '') + (bound ? ' <span class="pg-variant-tag pg-tag-bound">🔒</span>' : '') + '</div>' +
-                        '<div class="pg-variant-id" title="' + esc(a) + '">' + esc(a) + '</div>' +
-                    '</div>' +
-                '</div>';
-    }
-    html += '</div>';
-    popup.innerHTML = html;
-    document.body.appendChild(popup);
-
-    // 定位（相对 anchorCard）
-    positionVariantPopup(popup, anchorCard);
-
-    // 事件
-    popup.querySelector('.pg-variant-close').addEventListener('click', closeVariantPopup);
-    popup.querySelectorAll('.pg-variant-item').forEach(el => {
-        el.addEventListener('click', async (e) => {
+    if (!badge.dataset.pgBound) {
+        badge.dataset.pgBound = '1';
+        badge.addEventListener('click', e => {
             e.preventDefault();
             e.stopPropagation();
-            const a = el.dataset.avatar;
-            await switchPersona(a);
-            closeVariantPopup();
+            const n = badge.dataset.cname;
+            toggleClusterExpand(n);
+            refreshMain();
         });
-    });
-
-    // 点击外部关闭
-    setTimeout(() => {
-        const handler = (e) => {
-            if (e.target.closest('#' + VARIANT_POPUP_ID)) return;
-            if (e.target.closest('.pg-unit-card')) return;
-            closeVariantPopup();
-        };
-        window.__pg_variant_outside = handler;
-        document.addEventListener('click', handler, true);
-    }, 0);
+    }
 }
 
-function positionVariantPopup(popup, anchor) {
-    const r = anchor.getBoundingClientRect();
-    popup.style.position = 'fixed';
-    const pw = Math.min(360, window.innerWidth - 16);
-    popup.style.width = pw + 'px';
-    // 默认放卡片右侧；放不下则放下方
-    const margin = 8;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    let left = r.right + margin;
-    let top = r.top;
-    const ph = popup.offsetHeight || 300;
-    if (left + pw + margin > vw) {
-        // 右边放不下，尝试放下方
-        left = Math.max(margin, Math.min(r.left, vw - pw - margin));
-        top = r.bottom + margin;
-        if (top + ph + margin > vh) {
-            // 下方也放不下，放上方
-            top = Math.max(margin, r.top - ph - margin);
-        }
-    } else {
-        if (top + ph + margin > vh) top = Math.max(margin, vh - ph - margin);
+function undecorateRepresentative(card) {
+    card.classList.remove('pg-cluster-rep', 'pg-cluster-expanded');
+    const badge = card.querySelector(':scope > .pg-cluster-badge');
+    if (badge) badge.remove();
+}
+
+/**
+ * 构建变体抽屉（无头像列表）
+ */
+function buildVariantDrawer(name, variants, cardMap) {
+    const drawer = document.createElement('div');
+    drawer.className = 'pg-variant-drawer';
+    drawer.dataset.cname = name;
+
+    const list = document.createElement('div');
+    list.className = 'pg-variant-list';
+
+    for (const a of variants) {
+        const item = document.createElement('div');
+        item.className = 'pg-variant-item';
+        item.dataset.avatar = a;
+        if (isCurrent(a)) item.classList.add('pg-current');
+        if (isBound(a)) item.classList.add('pg-bound');
+
+        const title = getTitle(a);
+        const desc = getDescription(a);
+        const subtitle = title || (desc ? desc.replace(/\s+/g, ' ').slice(0, 30) + (desc.length > 30 ? '…' : '') : '(无备注 / 无描述)');
+
+        item.innerHTML =
+            '<div class="pg-variant-main">' +
+              '<span class="pg-variant-name">' + esc(name) + '</span>' +
+              '<span class="pg-variant-sub">' + esc(subtitle) + '</span>' +
+            '</div>' +
+            '<div class="pg-variant-tags">' +
+              (isBound(a) ? '<span class="pg-variant-tag pg-tag-bound" title="已绑定"><i class="fa-solid fa-link"></i></span>' : '') +
+              (isCurrent(a) ? '<span class="pg-variant-tag pg-tag-current" title="当前">★</span>' : '') +
+            '</div>';
+
+        item.addEventListener('click', async e => {
+            e.preventDefault();
+            e.stopPropagation();
+            await switchPersona(a);
+            // 立即更新 UI 反馈
+            list.querySelectorAll('.pg-variant-item.pg-current').forEach(x => x.classList.remove('pg-current'));
+            item.classList.add('pg-current');
+            setTimeout(updateQuickBtnAvatar, 50);
+        });
+
+        list.appendChild(item);
     }
-    popup.style.left = left + 'px';
-    popup.style.top = top + 'px';
+    drawer.appendChild(list);
+    return drawer;
 }
 
 async function ensureAllCardsInDom() {
@@ -998,7 +919,6 @@ async function ensureAllCardsInDom() {
 
     const presentInDom = new Set();
     block.querySelectorAll(':scope > .avatar-container').forEach(c => {
-        if (c.classList.contains('pg-unit-card')) return;
         const id = getCardAvatarId(c);
         if (id) presentInDom.add(id);
     });
@@ -1013,20 +933,20 @@ async function ensureAllCardsInDom() {
 
     const presentAfter = new Set();
     block.querySelectorAll(':scope > .avatar-container').forEach(c => {
-        if (c.classList.contains('pg-unit-card')) return;
         const id = getCardAvatarId(c);
         if (id) presentAfter.add(id);
     });
     const stillMissing = allAvatars.filter(a => !presentAfter.has(a));
     if (stillMissing.length === 0) return;
 
-    const template = block.querySelector(':scope > .avatar-container:not(.pg-unit-card)');
+    const template = block.querySelector(':scope > .avatar-container');
     if (!template) return;
 
     for (const avatar of stillMissing) {
         const clone = template.cloneNode(true);
-        clone.classList.remove('selected');
-        clone.classList.remove('pg-unit-card');
+        clone.classList.remove('selected', 'pg-cluster-rep', 'pg-cluster-expanded');
+        // 清掉模板可能带来的徽章
+        clone.querySelectorAll('.pg-cluster-badge').forEach(el => el.remove());
 
         clone.dataset.avatarId = avatar;
         clone.setAttribute('title', avatar);
@@ -1069,6 +989,8 @@ async function ensureAllCardsInDom() {
 
         clone.addEventListener('click', async (e) => {
             if (state.selectMode) return;
+            // 点徽章不触发切换
+            if (e.target.closest('.pg-cluster-badge')) return;
             const before = power_user.user_avatar;
             setTimeout(async () => {
                 if (power_user.user_avatar === before) {
@@ -1090,9 +1012,7 @@ function applySelectModeUI() {
     });
     if (!state.selectMode) return;
 
-    // 多选模式下：U 卡片不应出现（在 reorganize 里就已被关闭），这里只作用于真实 avatar 卡
     block.querySelectorAll('.avatar-container').forEach(c => {
-        if (c.classList.contains('pg-unit-card')) return;
         const id = getCardAvatarId(c);
         if (!id) return;
         c.classList.add('pg-select-mode');
@@ -1171,7 +1091,7 @@ function bindWrappers(block) {
     });
 }
 
-// ========== 位置2：快捷弹窗（不合并） ==========
+// ========== 位置2：快捷弹窗 ==========
 let _popperInstance = null;
 
 function initQuick() {
@@ -1382,10 +1302,7 @@ function renderQuick() {
 }
 
 function renderQuickAv(a) {
-    // 在 quick 弹窗里显示「名字 + 备注」以便区分同名人设
-    const t = getTitle(a);
-    const tipText = t ? (getName(a) + ' · ' + t) : getName(a);
-    return '<div class="pg-quick-avatar' + (isCurrent(a)?' pg-current':'') + '" data-avatar="' + esc(a) + '" title="' + esc(tipText) + '"><img src="' + getAvatarUrl(a) + '"></div>';
+    return '<div class="pg-quick-avatar' + (isCurrent(a)?' pg-current':'') + '" data-avatar="' + esc(a) + '" title="' + esc(getName(a)) + '"><img src="' + getAvatarUrl(a) + '"></div>';
 }
 
 // ========== 入口 ==========
