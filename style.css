@@ -449,18 +449,82 @@ body.square-avatars .pg-quick-avatar { border-radius: 2px; }
     min-width: 56px;
 }
 
-/* 排序模式下：分组 header 与人设卡片 显示拖动光标 */
-#user_avatar_block.pg-sort-mode .pg-group-header {
+/* ====== 拖拽手柄（仅排序模式下显示） ====== */
+.pg-drag-handle {
+    display: none;
+    align-items: center;
+    justify-content: center;
     cursor: grab;
+    color: var(--SmartThemeBodyColor);
+    opacity: 0.75;
+    user-select: none;
+    -webkit-user-select: none;
+    /* 关键：禁掉触摸滚动手势，让拖拽事件能拿到 */
+    touch-action: none;
+    -webkit-touch-callout: none;
+    transition: opacity 0.15s, color 0.15s, background 0.15s;
 }
-#user_avatar_block.pg-sort-mode .pg-group-header:active {
+.pg-drag-handle:hover {
+    opacity: 1;
+    color: var(--SmartThemeQuoteColor);
+}
+.pg-drag-handle:active {
     cursor: grabbing;
 }
+
+/* 仅在排序模式下显示 */
+#user_avatar_block.pg-sort-mode .pg-drag-handle {
+    display: inline-flex;
+}
+
+/* —— 卡片上的手柄：左上角浮动 —— */
+.pg-drag-handle-card {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    z-index: 6;
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    background: var(--black50a);
+    backdrop-filter: blur(4px);
+    font-size: 14px;
+    border: 1px solid var(--SmartThemeBorderColor);
+}
+.pg-drag-handle-card:hover {
+    background: var(--SmartThemeQuoteColor);
+    color: var(--SmartThemeBodyColor);
+}
+
+/* 卡片在排序模式下需要相对定位以承载手柄；并加视觉提示 */
 #user_avatar_block.pg-sort-mode .avatar-container {
-    cursor: grab;
+    position: relative;
 }
-#user_avatar_block.pg-sort-mode .avatar-container:active {
-    cursor: grabbing;
+#user_avatar_block.pg-sort-mode .avatar-container::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border: 1px dashed var(--SmartThemeQuoteColor);
+    border-radius: 4px;
+    pointer-events: none;
+    opacity: 0.4;
+}
+
+/* —— 分组 header 上的手柄：放在最左 —— */
+.pg-drag-handle-group {
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    font-size: 15px;
+    flex-shrink: 0;
+}
+.pg-drag-handle-group:hover {
+    background: var(--white20a);
+}
+
+/* 排序模式下 header 整体不再 cursor:grab，光标只在手柄上 */
+#user_avatar_block.pg-sort-mode .pg-group-header {
+    cursor: default;
 }
 
 /* 未分组容器（排序模式时使用，复用分组 body 的样式） */
