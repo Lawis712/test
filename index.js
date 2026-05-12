@@ -758,7 +758,8 @@ async function reorganizeNative() {
             }
         }
 
-        applySelectModeUI();
+               applySelectModeUI();
+        applySortModeUI();          // ⭐ 新增
         bindWrappers(block);
         renderPager(totalPages);
 
@@ -902,6 +903,38 @@ function applySelectModeUI() {
     });
 }
 
+function applySortModeUI() {
+    const block = document.getElementById('user_avatar_block');
+    if (!block) return;
+    // 清掉旧的手柄
+    block.querySelectorAll('.pg-drag-handle').forEach(h => h.remove());
+    if (!state.sortMode) return;
+
+    // 给每个人设卡片加手柄
+    block.querySelectorAll('.avatar-container').forEach(c => {
+        const handle = document.createElement('div');
+        handle.className = 'pg-drag-handle pg-drag-handle-card';
+        handle.title = '拖动排序';
+        handle.innerHTML = '<i class="fa-solid fa-grip-lines"></i>';
+        // 阻止点击穿透（避免触发卡片切换）
+        handle.addEventListener('click', e => { e.stopPropagation(); e.preventDefault(); });
+        c.appendChild(handle);
+    });
+
+    // 给每个分组 header 左侧加手柄
+    block.querySelectorAll(':scope > .pg-group-wrapper').forEach(w => {
+        const header = w.querySelector('.pg-group-header');
+        if (!header) return;
+        const handle = document.createElement('div');
+        handle.className = 'pg-drag-handle pg-drag-handle-group';
+        handle.title = '拖动分组';
+        handle.innerHTML = '<i class="fa-solid fa-grip-lines"></i>';
+        handle.addEventListener('click', e => { e.stopPropagation(); e.preventDefault(); });
+        // 插到 header 的最前面
+        header.insertBefore(handle, header.firstChild);
+    });
+}
+
 function updateSelectionCount() {
     const t = document.getElementById(TOOLBAR_ID);
     if (!t) return;
@@ -978,21 +1011,27 @@ function enableSortable(block) {
             console.warn('[' + EXT_NAME + '] SortableJS 不可用，排序模式无法启用拖拽。');
             return;
         }
-        if (!state.sortMode) return; // 加载完成时可能已退出
+        if (!state.sortMode) return;
 
         block.classList.add('pg-sort-mode');
 
-        // 1) 分组之间的排序（拖动 .pg-group-wrapper）
-        //    挂在 block 上，但只让 .pg-group-wrapper 参与；handle 限定到 header
+        const commonOpts = {
+            animation: 150,
+            // 桌面立即拖；触摸设备稍微延迟避免与滚动冲突
+            delay: 0,
+            delayOnTouchOnly: true,
+            touchStartThreshold: 5,
+            // 触摸时若是从手柄开始，不要被浏览器吞掉
+            forceFallback: false,
+        };
+
+        // 1) 分组之间排序
         const groupSortable = Sortable.create(block, {
+            ...commonOpts,
             group: { name: 'pg-groups', pull: false, put: false },
             draggable: '.pg-group-wrapper',
-            handle: '.pg-group-header',
-            animation: 150,
-            filter: '.pg-group-actions, .pg-group-actions *',
-            preventOnFilter: false,
+            handle: '.pg-drag-handle-group',   // ⭐ 只能从分组手柄拖
             onEnd: () => {
-                // 按 DOM 顺序重写 groups 数组
                 const order = Array.from(block.querySelectorAll(':scope > .pg-group-wrapper'))
                     .map(w => w.dataset.gid)
                     .filter(Boolean);
@@ -1000,7 +1039,6 @@ function enableSortable(block) {
                 const map = new Map(gs.map(g => [g.id, g]));
                 const newArr = [];
                 for (const id of order) if (map.has(id)) { newArr.push(map.get(id)); map.delete(id); }
-                // 剩下的（理论上不应该有）追加到末尾
                 for (const g of map.values()) newArr.push(g);
                 extension_settings[KEY].groups = newArr;
                 saveGroups();
@@ -1008,13 +1046,14 @@ function enableSortable(block) {
         });
         _sortableInstances.push(groupSortable);
 
-        // 2) 组内人设排序 + 跨组互拖
+        // 2) 组内 + 未分组 + 跨组互拖
         const bodies = block.querySelectorAll('.pg-group-body, .pg-ungrouped-wrapper');
         bodies.forEach(body => {
             const inst = Sortable.create(body, {
+                ...commonOpts,
                 group: { name: 'pg-personas', pull: true, put: true },
                 draggable: '.avatar-container',
-                animation: 150,
+                handle: '.pg-drag-handle-card',   // ⭐ 只能从卡片手柄拖
                 onEnd: () => {
                     persistPersonaOrders(block);
                 },
@@ -1025,6 +1064,7 @@ function enableSortable(block) {
         console.error('[' + EXT_NAME + '] Failed to load Sortable:', err);
     });
 }
+
 
 function disableSortable() {
     while (_sortableInstances.length) {
