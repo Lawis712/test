@@ -25,9 +25,9 @@ import { extension_settings } from '../../../extensions.js';
 import { eventSource, event_types, saveSettingsDebounced } from '../../../../script.js';
 import { power_user } from '../../../power-user.js';
 
-const EXT_NAME = 'Persona Groups';
-const EXT_DISPLAY = '用户人设分组';
-const KEY = 'persona_groups';
+const EXT_NAME = 'tttest';
+const EXT_DISPLAY = 'tttest';
+const KEY = 'persona_groups-test';
 const TOOLBAR_ID = 'pg-toolbar-container';
 const PAGER_ID = 'pg-pager';
 const BTN_ID = 'pg-quick-btn';
@@ -43,8 +43,8 @@ function initStorage() {
             version: 2,
             groupsHidden: false,
             quickEnabled: true,
-            sortEnabled: false,
-            ungroupedOrder: [],
+            mergeByName: false,
+            expandedClusters: [],
         };
         saveSettingsDebounced();
     }
@@ -52,8 +52,8 @@ function initStorage() {
     if (!extension_settings[KEY].pageSize) extension_settings[KEY].pageSize = 20;
     if (typeof extension_settings[KEY].groupsHidden !== 'boolean') extension_settings[KEY].groupsHidden = false;
     if (typeof extension_settings[KEY].quickEnabled !== 'boolean') extension_settings[KEY].quickEnabled = true;
-    if (typeof extension_settings[KEY].sortEnabled !== 'boolean') extension_settings[KEY].sortEnabled = false;
-    if (!Array.isArray(extension_settings[KEY].ungroupedOrder)) extension_settings[KEY].ungroupedOrder = [];
+    if (typeof extension_settings[KEY].mergeByName !== 'boolean') extension_settings[KEY].mergeByName = false;
+    if (!Array.isArray(extension_settings[KEY].expandedClusters)) extension_settings[KEY].expandedClusters = [];
     saveSettingsDebounced();
 }
 function getGroups() { return extension_settings[KEY].groups; }
@@ -63,10 +63,20 @@ function isGroupsHidden() { return !!extension_settings[KEY].groupsHidden; }
 function setGroupsHidden(v) { extension_settings[KEY].groupsHidden = !!v; saveSettingsDebounced(); }
 function isQuickEnabled() { return !!extension_settings[KEY].quickEnabled; }
 function setQuickEnabled(v) { extension_settings[KEY].quickEnabled = !!v; saveSettingsDebounced(); }
-function isSortEnabled() { return !!extension_settings[KEY].sortEnabled; }
-function setSortEnabled(v) { extension_settings[KEY].sortEnabled = !!v; saveSettingsDebounced(); }
-function getUngroupedOrder() { return extension_settings[KEY].ungroupedOrder || []; }
-function setUngroupedOrder(arr) { extension_settings[KEY].ungroupedOrder = Array.isArray(arr) ? arr : []; saveSettingsDebounced(); }
+function isMergeByName() { return !!extension_settings[KEY].mergeByName; }
+function setMergeByName(v) { extension_settings[KEY].mergeByName = !!v; saveSettingsDebounced(); }
+function getExpandedClusters() {
+    if (!Array.isArray(extension_settings[KEY].expandedClusters)) extension_settings[KEY].expandedClusters = [];
+    return extension_settings[KEY].expandedClusters;
+}
+function isClusterExpanded(name) { return getExpandedClusters().includes(name); }
+function toggleClusterExpand(name) {
+    const arr = getExpandedClusters();
+    const i = arr.indexOf(name);
+    if (i >= 0) arr.splice(i, 1);
+    else arr.push(name);
+    saveSettingsDebounced();
+}
 function saveGroups() { saveSettingsDebounced(); }
 function createGroup(name) {
     const id = 'g_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
@@ -135,6 +145,16 @@ function getName(a) {
     if (raw.length > 200 || raw.includes('\n')) return a;
     return raw || a;
 }
+function getTitle(a) {
+    const desc = (power_user.persona_descriptions || {})[a];
+    if (desc && typeof desc.title === 'string') return desc.title.trim();
+    return '';
+}
+function getDescription(a) {
+    const desc = (power_user.persona_descriptions || {})[a];
+    if (desc && typeof desc.description === 'string') return desc.description;
+    return '';
+}
 function getAvatarUrl(a) { return '/thumbnail?type=persona&file=' + encodeURIComponent(a); }
 function isBound(a) {
     const desc = (power_user.persona_descriptions || {})[a];
@@ -170,28 +190,29 @@ function isStQuickPersonaEnabled() {
     return !!(qp && qp.enabled === true);
 }
 
+// ========== 同名簇 ==========
 /**
- * 按持久化顺序排序未分组人设
- * @param {string[]} ungroupedAvatars - 当前实际的未分组头像列表
- * @returns {string[]} 按用户自定义顺序排好的列表
+ * 把一组 avatars 按 name 分簇。
+ * 返回 { clusters: [{name, avatars: [a, a, ...]}], avatarToCluster: Map<avatar, clusterRef> }
+ * 簇内 avatars 顺序 = 输入顺序
+ * clusters 顺序 = 每个簇首次出现的顺序
  */
-function applyUngroupedOrder(ungroupedAvatars) {
-    const order = getUngroupedOrder();
-    if (!order.length) return ungroupedAvatars.slice();
-    const set = new Set(ungroupedAvatars);
-    const ordered = [];
-    const seen = new Set();
-    for (const a of order) {
-        if (set.has(a) && !seen.has(a)) {
-            ordered.push(a);
-            seen.add(a);
+function buildClusters(avatars) {
+    const map = new Map(); // name -> cluster
+    const clusters = [];
+    const avatarToCluster = new Map();
+    for (const a of avatars) {
+        const name = getName(a);
+        let c = map.get(name);
+        if (!c) {
+            c = { name, avatars: [] };
+            map.set(name, c);
+            clusters.push(c);
         }
+        c.avatars.push(a);
+        avatarToCluster.set(a, c);
     }
-    // 追加未在 order 中出现的（新增的人设等）
-    for (const a of ungroupedAvatars) {
-        if (!seen.has(a)) ordered.push(a);
-    }
-    return ordered;
+    return { clusters, avatarToCluster };
 }
 
 // ========== ST API ==========
@@ -236,11 +257,8 @@ async function switchPersona(avatar) {
     }
 }
 
-const state = { selectMode: false, sortMode: false, selected: new Set(), filter: 'all', page: 0, search: '' };
+const state = { selectMode: false, selected: new Set(), filter: 'all', page: 0, search: '' };
 let isReorganizing = false;
-
-// SortableJS 实例缓存
-const _sortableInstances = [];
 
 // ========== 扩展设置面板 ==========
 function initExtensionSettings() {
@@ -266,13 +284,13 @@ function initExtensionSettings() {
                         </label>
                         <small class="pg-setting-hint" id="pg-setting-quick-hint" style="display:none; opacity:0.7; margin-top:4px; font-style:italic;"></small>
                     </div>
-                    <div class="pg-setting-row">
-                        <label class="checkbox_label" for="pg-setting-sort-enabled">
-                            <input type="checkbox" id="pg-setting-sort-enabled">
-                            <span>启用排序按钮（在工具栏显示，可拖拽分组与人设）</span>
+                    <div class="pg-setting-row" style="margin-top:10px;">
+                        <label class="checkbox_label" for="pg-setting-merge-byname">
+                            <input type="checkbox" id="pg-setting-merge-byname">
+                            <span>合并同名人设（同名折叠为一张卡，展开后切换变体）</span>
                         </label>
-                        <small class="pg-setting-hint" style="opacity:0.7; margin-top:4px; font-style:italic;">
-                            开启后工具栏会多出一个"排序"按钮，点击进入排序模式；排序模式下可拖动分组、组内人设，以及跨组移动人设。
+                        <small class="pg-setting-hint" style="opacity:0.7; margin-top:4px; font-style:italic; display:block;">
+                            适合"同一个角色，多套设定"的玩法。仅影响位置1（管理面板）。多选模式下自动展平。
                         </small>
                     </div>
                 </div>
@@ -283,7 +301,7 @@ function initExtensionSettings() {
 
     const $cb = $panel.find('#pg-setting-quick-enabled');
     const $hint = $panel.find('#pg-setting-quick-hint');
-    const $cbSort = $panel.find('#pg-setting-sort-enabled');
+    const $mb = $panel.find('#pg-setting-merge-byname');
 
     function updateUI() {
         const enabled = isQuickEnabled();
@@ -296,7 +314,7 @@ function initExtensionSettings() {
             $cb.prop('disabled', false);
             $hint.hide();
         }
-        $cbSort.prop('checked', isSortEnabled());
+        $mb.prop('checked', isMergeByName());
     }
 
     $cb.on('change', function () {
@@ -309,14 +327,9 @@ function initExtensionSettings() {
         }
     });
 
-    $cbSort.on('change', function () {
+    $mb.on('change', function () {
         const v = $(this).prop('checked');
-        setSortEnabled(v);
-        // 关闭排序开关时，自动退出排序模式
-        if (!v && state.sortMode) {
-            state.sortMode = false;
-            disableSortable();
-        }
+        setMergeByName(v);
         refreshMain();
     });
 
@@ -402,6 +415,7 @@ function renderToolbar() {
     const t = document.getElementById(TOOLBAR_ID);
     if (!t) return;
     const hidden = isGroupsHidden();
+    const merge = isMergeByName();
 
     const currentGroupId = getFilterGroupId();
     if (currentGroupId && !getGroups().find(g => g.id === currentGroupId)) {
@@ -428,9 +442,7 @@ function renderToolbar() {
     html += '<button class="menu_button pg-btn-newgroup" title="新建分组"><i class="fa-solid fa-folder-plus"></i></button>';
     html += '<button class="menu_button pg-btn-selectmode' + (state.selectMode?' pg-active':'') + '" title="多选模式"><i class="fa-solid fa-check-double"></i></button>';
     html += '<button class="menu_button pg-btn-toggle-groups' + (hidden?' pg-active':'') + '" title="' + (hidden?'显示分组':'隐藏分组') + '"><i class="fa-solid ' + (hidden?'fa-eye-slash':'fa-eye') + '"></i></button>';
-    if (isSortEnabled()) {
-        html += '<button class="menu_button pg-btn-sortmode' + (state.sortMode?' pg-active':'') + '" title="' + (state.sortMode?'退出排序模式':'排序模式（拖拽分组与人设）') + '"><i class="fa-solid fa-arrows-up-down-left-right"></i></button>';
-    }
+    html += '<button class="menu_button pg-btn-toggle-merge' + (merge?' pg-active':'') + '" title="' + (merge?'展开同名':'合并同名') + '"><i class="fa-solid ' + (merge?'fa-layer-group':'fa-object-ungroup') + '"></i></button>';
     html += '</div>';
 
     if (state.selectMode) {
@@ -444,9 +456,8 @@ function renderToolbar() {
         html += '</div>';
     }
 
-    if (state.sortMode) {
-        html += '<div class="pg-sort-hint">🔀 排序模式：拖动分组/人设进行排序，点击不再切换人设。' +
-            '<button class="menu_button pg-btn-exit-sort" style="margin-left:8px;">完成</button></div>';
+    if (merge && !state.selectMode) {
+        html += '<div class="pg-merge-hint">📚 已开启同名合并：相同名字的人设折叠为一张卡，点右上角徽章 <span class="pg-merge-hint-badge">×N</span> 展开变体</div>';
     }
 
     t.innerHTML = html;
@@ -462,34 +473,17 @@ function bindToolbar(t) {
         if (n && n.trim()) { createGroup(n.trim()); refreshMain(); }
     });
     const sm = t.querySelector('.pg-btn-selectmode');
-    if (sm) sm.addEventListener('click', () => {
-        // 与排序模式互斥
-        if (state.sortMode) { state.sortMode = false; disableSortable(); }
-        state.selectMode = !state.selectMode;
-        state.selected.clear();
-        refreshMain();
-    });
+    if (sm) sm.addEventListener('click', () => { state.selectMode = !state.selectMode; state.selected.clear(); refreshMain(); });
     const tg = t.querySelector('.pg-btn-toggle-groups');
     if (tg) tg.addEventListener('click', () => {
         setGroupsHidden(!isGroupsHidden());
         state.page = 0;
         refreshMain();
     });
-
-    const sortBtn = t.querySelector('.pg-btn-sortmode');
-    if (sortBtn) sortBtn.addEventListener('click', () => {
-        // 与多选互斥
-        if (state.selectMode) { state.selectMode = false; state.selected.clear(); }
-        state.sortMode = !state.sortMode;
-        if (!state.sortMode) disableSortable();
+    const tm = t.querySelector('.pg-btn-toggle-merge');
+    if (tm) tm.addEventListener('click', () => {
+        setMergeByName(!isMergeByName());
         state.page = 0;
-        refreshMain();
-    });
-
-    const exitSort = t.querySelector('.pg-btn-exit-sort');
-    if (exitSort) exitSort.addEventListener('click', () => {
-        state.sortMode = false;
-        disableSortable();
         refreshMain();
     });
 
@@ -548,6 +542,30 @@ function renderPager(totalPages) {
     });
 }
 
+/**
+ * 在合并模式下，对一个 avatar 列表做"簇折叠"：
+ * 输入：[a1, a2, a3, a4]（其中 a1, a3 同名）
+ * 输出：[a1, a2, a4] —— 同名簇只保留代表（第一个）
+ */
+function collapseToRepresentatives(avatars) {
+    const seen = new Set();
+    const out = [];
+    for (const a of avatars) {
+        const name = getName(a);
+        if (seen.has(name)) continue;
+        seen.add(name);
+        out.push(a);
+    }
+    return out;
+}
+
+/**
+ * 拿到名字下的所有变体（按 allAvatars 中的顺序）
+ */
+function getVariantsOfName(name, allAvatars) {
+    return allAvatars.filter(a => getName(a) === name);
+}
+
 async function reorganizeNative() {
     const block = document.getElementById('user_avatar_block');
     if (!block) return;
@@ -559,24 +577,11 @@ async function reorganizeNative() {
         await refreshValidAvatars();
     }
 
-    // 进入新一轮渲染前，先销毁旧的 Sortable 实例，避免悬挂引用
-    disableSortable();
-
     if (state.search.trim()) {
+        // 搜索模式：完全展开（不合并），由 ST 原生搜索决定显示
         isReorganizing = true;
         try {
-            block.querySelectorAll(':scope > .pg-group-wrapper').forEach(w => {
-                const body = w.querySelector('.pg-group-body');
-                if (body) {
-                    Array.from(body.children).forEach(child => {
-                        if (child.classList.contains('avatar-container')) {
-                            block.appendChild(child);
-                        }
-                    });
-                }
-                w.remove();
-            });
-            block.querySelectorAll(':scope > .pg-empty-hint').forEach(el => el.remove());
+            cleanupCustomDom(block);
             block.querySelectorAll(':scope > .avatar-container').forEach(c => {
                 c.style.display = '';
             });
@@ -595,30 +600,11 @@ async function reorganizeNative() {
     }
 
     const pager = document.getElementById(PAGER_ID);
-    // 排序模式下隐藏分页栏
-    if (pager) pager.style.display = state.sortMode ? 'none' : '';
+    if (pager) pager.style.display = '';
 
     isReorganizing = true;
     try {
-        block.querySelectorAll(':scope > .pg-group-wrapper').forEach(w => {
-            const body = w.querySelector('.pg-group-body');
-            if (body) {
-                Array.from(body.children).forEach(child => {
-                    if (child.classList.contains('avatar-container')) {
-                        block.appendChild(child);
-                    }
-                });
-            }
-            w.remove();
-        });
-        block.querySelectorAll(':scope > .pg-empty-hint').forEach(el => el.remove());
-        block.querySelectorAll(':scope > .pg-ungrouped-wrapper').forEach(el => {
-            // 把卡片移回根，再删壳
-            Array.from(el.children).forEach(child => {
-                if (child.classList.contains('avatar-container')) block.appendChild(child);
-            });
-            el.remove();
-        });
+        cleanupCustomDom(block);
 
         await ensureAllCardsInDom();
 
@@ -633,7 +619,10 @@ async function reorganizeNative() {
         const filterGroupId = getFilterGroupId();
         const isFilteringByGroup = !!filterGroupId;
         const hidden = isGroupsHidden();
+        // 多选模式下强制展平，方便精确选择
+        const merge = isMergeByName() && !state.selectMode;
 
+        // 单 avatar 是否通过筛选
         const passFilter = (avatar) => {
             if (isFilteringByGroup) return true;
             if (state.filter === 'bound' && !isBound(avatar)) return false;
@@ -641,59 +630,81 @@ async function reorganizeNative() {
             return true;
         };
 
+        // 簇是否通过筛选（已绑定=任一变体已绑定；未绑定=全部未绑定）
+        const passFilterCluster = (avatars) => {
+            if (isFilteringByGroup) return true;
+            if (state.filter === 'bound') return avatars.some(isBound);
+            if (state.filter === 'unbound') return avatars.every(a => !isBound(a));
+            return true;
+        };
+
         const groups = getGroups();
         const groupedSet = new Set();
         for (const g of groups) g.personas.forEach(a => groupedSet.add(a));
         const allAvatars = getAllAvatars().filter(a => cardMap.has(a));
-        let ungroupedAvatars = allAvatars.filter(a => !groupedSet.has(a));
-        // 应用用户自定义未分组顺序
-        ungroupedAvatars = applyUngroupedOrder(ungroupedAvatars);
+        const ungroupedAvatars = allAvatars.filter(a => !groupedSet.has(a));
 
-        let pageItemsForDisplay = [];
+        let pageItemsForDisplay = []; // 仅用于"未分组区"的分页展示，存的是要显示的代表 avatar
         let totalPages = 1;
 
         if (isFilteringByGroup) {
+            // 单分组筛选：在该分组内做合并/分页
             const targetGroup = groups.find(g => g.id === filterGroupId);
-            const groupAvatars = targetGroup
+            let groupAvatars = targetGroup
                 ? targetGroup.personas.filter(a => cardMap.has(a))
                 : [];
-            if (state.sortMode) {
-                // 排序模式下不分页
-                pageItemsForDisplay = groupAvatars;
-                totalPages = 1;
-            } else {
-                const pageSize = getPageSize();
-                totalPages = Math.max(1, Math.ceil(groupAvatars.length / pageSize));
-                if (state.page >= totalPages) state.page = totalPages - 1;
-                if (state.page < 0) state.page = 0;
-                const start = state.page * pageSize;
-                pageItemsForDisplay = groupAvatars.slice(start, start + pageSize);
+
+            if (merge) {
+                // 合并：把组内同名的折叠成代表，但变体仅取本组内的
+                groupAvatars = collapseToRepresentatives(groupAvatars);
             }
+
+            const pageSize = getPageSize();
+            totalPages = Math.max(1, Math.ceil(groupAvatars.length / pageSize));
+            if (state.page >= totalPages) state.page = totalPages - 1;
+            if (state.page < 0) state.page = 0;
+            const start = state.page * pageSize;
+            pageItemsForDisplay = groupAvatars.slice(start, start + pageSize);
         } else {
-            const ungroupedFiltered = ungroupedAvatars.filter(passFilter);
-            if (state.sortMode) {
-                // 排序模式下显示所有未分组（不分页）
-                pageItemsForDisplay = ungroupedFiltered;
-                totalPages = 1;
-                if (ungroupedFiltered.length > 200 && !window.__pg_sort_warned) {
-                    window.__pg_sort_warned = true;
-                    console.warn('[' + EXT_NAME + '] 未分组人设较多（' + ungroupedFiltered.length + '），排序模式可能略卡。');
-                }
+            // 全局视图：未分组区 + 各分组区
+            let ungroupedFiltered;
+            if (merge) {
+                // 合并：先按名字分簇，整簇通过筛选才显示，并以代表展示
+                const reps = collapseToRepresentatives(ungroupedAvatars);
+                ungroupedFiltered = reps.filter(rep => {
+                    const name = getName(rep);
+                    const variants = getVariantsOfName(name, ungroupedAvatars);
+                    return passFilterCluster(variants);
+                });
             } else {
-                const pageSize = getPageSize();
-                totalPages = Math.max(1, Math.ceil(ungroupedFiltered.length / pageSize));
-                if (state.page >= totalPages) state.page = totalPages - 1;
-                if (state.page < 0) state.page = 0;
-                const start = state.page * pageSize;
-                pageItemsForDisplay = ungroupedFiltered.slice(start, start + pageSize);
+                ungroupedFiltered = ungroupedAvatars.filter(passFilter);
             }
+            const pageSize = getPageSize();
+            totalPages = Math.max(1, Math.ceil(ungroupedFiltered.length / pageSize));
+            if (state.page >= totalPages) state.page = totalPages - 1;
+            if (state.page < 0) state.page = 0;
+            const start = state.page * pageSize;
+            pageItemsForDisplay = ungroupedFiltered.slice(start, start + pageSize);
 
             if (!hidden) {
                 const fragmentsToPrepend = [];
                 for (const g of groups) {
-                    const visibleInGroup = g.personas.filter(a => cardMap.has(a) && passFilter(a));
-                    const totalPersonasInGroup = g.personas.filter(a => cardMap.has(a)).length;
-                    if (totalPersonasInGroup > 0 && visibleInGroup.length === 0) continue;
+                    let groupCards = g.personas.filter(a => cardMap.has(a));
+                    const totalPersonasInGroup = groupCards.length;
+
+                    let visibleItems; // 通过筛选后真正要显示的 "代表 avatar" 列表（合并模式）或普通 avatar 列表
+                    if (merge) {
+                        const reps = collapseToRepresentatives(groupCards);
+                        visibleItems = reps.filter(rep => {
+                            const name = getName(rep);
+                            const variants = getVariantsOfName(name, groupCards);
+                            return passFilterCluster(variants);
+                        });
+                    } else {
+                        visibleItems = groupCards.filter(passFilter);
+                    }
+
+                    if (totalPersonasInGroup > 0 && visibleItems.length === 0) continue;
 
                     const wrapper = document.createElement('div');
                     wrapper.className = 'pg-group-wrapper' + (g.collapsed ? ' pg-collapsed' : '');
@@ -702,7 +713,7 @@ async function reorganizeNative() {
 
                     const header = document.createElement('div');
                     header.className = 'pg-group-header';
-                    const countText = totalPersonasInGroup === 0 ? '空' : visibleInGroup.length;
+                    const countText = totalPersonasInGroup === 0 ? '空' : visibleItems.length;
                     header.innerHTML =
                         '<i class="fa-solid fa-chevron-down pg-toggle"></i>' +
                         '<span class="pg-group-name">' + esc(g.name) + '</span>' +
@@ -716,13 +727,26 @@ async function reorganizeNative() {
                     const body = document.createElement('div');
                     body.className = 'pg-group-body';
                     if (!g.collapsed && totalPersonasInGroup > 0) {
-                        for (const a of g.personas) {
-                            if (cardMap.has(a) && passFilter(a)) {
-                                const card = cardMap.get(a);
-                                if (card) {
-                                    card.style.display = '';
-                                    body.appendChild(card);
+                        for (const rep of visibleItems) {
+                            const card = cardMap.get(rep);
+                            if (!card) continue;
+                            card.style.display = '';
+                            body.appendChild(card);
+
+                            if (merge) {
+                                const name = getName(rep);
+                                const variants = getVariantsOfName(name, groupCards);
+                                if (variants.length > 1) {
+                                    decorateRepresentative(card, name, variants.length);
+                                    if (isClusterExpanded(name)) {
+                                        const drawer = buildVariantDrawer(name, variants, cardMap);
+                                        body.appendChild(drawer);
+                                    }
+                                } else {
+                                    undecorateRepresentative(card);
                                 }
+                            } else {
+                                undecorateRepresentative(card);
                             }
                         }
                     } else if (!g.collapsed && totalPersonasInGroup === 0) {
@@ -737,36 +761,40 @@ async function reorganizeNative() {
             }
         }
 
-        // 排序模式下，把"未分组卡片"也包到一个 wrapper 里，便于 Sortable 识别
-        if (state.sortMode && !isFilteringByGroup) {
-            const ungroupedWrapper = document.createElement('div');
-            ungroupedWrapper.className = 'pg-ungrouped-wrapper pg-group-body';
-            ungroupedWrapper.dataset.ungrouped = '1';
-            for (const a of pageItemsForDisplay) {
-                const card = cardMap.get(a);
-                if (!card) continue;
-                card.style.display = '';
-                ungroupedWrapper.appendChild(card);
-            }
-            block.appendChild(ungroupedWrapper);
-        } else {
-            for (const a of pageItemsForDisplay) {
-                const card = cardMap.get(a);
-                if (!card) continue;
-                card.style.display = '';
-                block.appendChild(card);
+        // 渲染未分组区（或筛选分组的当前页）
+        for (const rep of pageItemsForDisplay) {
+            const card = cardMap.get(rep);
+            if (!card) continue;
+            card.style.display = '';
+            block.appendChild(card);
+
+            if (merge) {
+                const name = getName(rep);
+                let scope;
+                if (isFilteringByGroup) {
+                    const targetGroup = groups.find(g => g.id === filterGroupId);
+                    scope = targetGroup ? targetGroup.personas.filter(a => cardMap.has(a)) : [];
+                } else {
+                    scope = ungroupedAvatars;
+                }
+                const variants = getVariantsOfName(name, scope);
+                if (variants.length > 1) {
+                    decorateRepresentative(card, name, variants.length);
+                    if (isClusterExpanded(name)) {
+                        const drawer = buildVariantDrawer(name, variants, cardMap);
+                        block.appendChild(drawer);
+                    }
+                } else {
+                    undecorateRepresentative(card);
+                }
+            } else {
+                undecorateRepresentative(card);
             }
         }
 
-               applySelectModeUI();
-        applySortModeUI();          // ⭐ 新增
+        applySelectModeUI();
         bindWrappers(block);
         renderPager(totalPages);
-
-        // 启用拖拽排序
-        if (state.sortMode) {
-            enableSortable(block);
-        }
     } finally {
         requestAnimationFrame(() => {
             isReorganizing = false;
@@ -775,6 +803,112 @@ async function reorganizeNative() {
             }
         });
     }
+}
+
+/**
+ * 把所有自定义 DOM（分组容器、变体抽屉、提示）拆掉，把卡片放回 block 顶层。
+ */
+function cleanupCustomDom(block) {
+    block.querySelectorAll(':scope > .pg-group-wrapper').forEach(w => {
+        const body = w.querySelector('.pg-group-body');
+        if (body) {
+            Array.from(body.children).forEach(child => {
+                if (child.classList.contains('avatar-container')) {
+                    block.appendChild(child);
+                }
+            });
+        }
+        w.remove();
+    });
+    block.querySelectorAll(':scope > .pg-empty-hint').forEach(el => el.remove());
+    block.querySelectorAll('.pg-variant-drawer').forEach(el => el.remove());
+    // 清掉残留的徽章
+    block.querySelectorAll('.pg-cluster-badge').forEach(el => el.remove());
+    block.querySelectorAll('.avatar-container.pg-cluster-rep').forEach(c => c.classList.remove('pg-cluster-rep', 'pg-cluster-expanded'));
+}
+
+/**
+ * 给代表卡加 "× N" 徽章
+ */
+function decorateRepresentative(card, name, count) {
+    card.classList.add('pg-cluster-rep');
+    if (isClusterExpanded(name)) card.classList.add('pg-cluster-expanded');
+    else card.classList.remove('pg-cluster-expanded');
+
+    let badge = card.querySelector(':scope > .pg-cluster-badge');
+    if (!badge) {
+        badge = document.createElement('div');
+        badge.className = 'pg-cluster-badge';
+        badge.title = '展开 / 收起 同名变体';
+        card.appendChild(badge);
+    }
+    badge.dataset.cname = name;
+    badge.innerHTML = '<i class="fa-solid fa-layer-group"></i><span>×' + count + '</span>';
+
+    if (!badge.dataset.pgBound) {
+        badge.dataset.pgBound = '1';
+        badge.addEventListener('click', e => {
+            e.preventDefault();
+            e.stopPropagation();
+            const n = badge.dataset.cname;
+            toggleClusterExpand(n);
+            refreshMain();
+        });
+    }
+}
+
+function undecorateRepresentative(card) {
+    card.classList.remove('pg-cluster-rep', 'pg-cluster-expanded');
+    const badge = card.querySelector(':scope > .pg-cluster-badge');
+    if (badge) badge.remove();
+}
+
+/**
+ * 构建变体抽屉（无头像列表）
+ */
+function buildVariantDrawer(name, variants, cardMap) {
+    const drawer = document.createElement('div');
+    drawer.className = 'pg-variant-drawer';
+    drawer.dataset.cname = name;
+
+    const list = document.createElement('div');
+    list.className = 'pg-variant-list';
+
+    for (const a of variants) {
+        const item = document.createElement('div');
+        item.className = 'pg-variant-item';
+        item.dataset.avatar = a;
+        if (isCurrent(a)) item.classList.add('pg-current');
+        if (isBound(a)) item.classList.add('pg-bound');
+
+        const title = getTitle(a);
+        const desc = getDescription(a);
+        const subtitle = title || (desc ? desc.replace(/\s+/g, ' ').slice(0, 30) + (desc.length > 30 ? '…' : '') : '(无备注 / 无描述)');
+
+        item.innerHTML =
+            '<div class="pg-variant-main">' +
+              '<span class="pg-variant-name">' + esc(name) + '</span>' +
+              '<span class="pg-variant-sub">' + esc(subtitle) + '</span>' +
+            '</div>' +
+            '<div class="pg-variant-tags">' +
+              (isBound(a) ? '<span class="pg-variant-tag pg-tag-bound" title="已绑定"><i class="fa-solid fa-link"></i></span>' : '') +
+              (isCurrent(a) ? '<span class="pg-variant-tag pg-tag-current" title="当前">★</span>' : '') +
+            '</div>';
+
+        item.addEventListener('click', async e => {
+            e.preventDefault();
+            e.stopPropagation();
+            await switchPersona(a);
+            // 立即更新 UI 反馈
+            list.querySelectorAll('.pg-variant-item.pg-current').forEach(x => x.classList.remove('pg-current'));
+            item.classList.add('pg-current');
+            setTimeout(updateQuickBtnAvatar, 50);
+        });
+
+        list.appendChild(item);
+    }
+    drawer.appendChild(list);
+    return drawer;
 }
 
 async function ensureAllCardsInDom() {
@@ -810,7 +944,9 @@ async function ensureAllCardsInDom() {
 
     for (const avatar of stillMissing) {
         const clone = template.cloneNode(true);
-        clone.classList.remove('selected');
+        clone.classList.remove('selected', 'pg-cluster-rep', 'pg-cluster-expanded');
+        // 清掉模板可能带来的徽章
+        clone.querySelectorAll('.pg-cluster-badge').forEach(el => el.remove());
 
         clone.dataset.avatarId = avatar;
         clone.setAttribute('title', avatar);
@@ -829,14 +965,12 @@ async function ensureAllCardsInDom() {
             el.textContent = getName(avatar);
         });
 
-        // 修复：用真实描述填充 .ch_description
         const desc = (power_user.persona_descriptions || {})[avatar] || {};
         const realDesc = desc.description || '';
         clone.querySelectorAll('.ch_description').forEach(el => {
             el.textContent = realDesc;
         });
 
-        // ⭐ 修复：根据真实 title 决定显示/隐藏 .ch_additional_info
         const realTitle = (typeof desc.title === 'string') ? desc.title.trim() : '';
         const nameBlock = clone.querySelector('.character_name_block');
         let infoEl = clone.querySelector('.ch_additional_info');
@@ -855,7 +989,8 @@ async function ensureAllCardsInDom() {
 
         clone.addEventListener('click', async (e) => {
             if (state.selectMode) return;
-            if (state.sortMode) return; // 排序模式下禁用切换
+            // 点徽章不触发切换
+            if (e.target.closest('.pg-cluster-badge')) return;
             const before = power_user.user_avatar;
             setTimeout(async () => {
                 if (power_user.user_avatar === before) {
@@ -903,38 +1038,6 @@ function applySelectModeUI() {
     });
 }
 
-function applySortModeUI() {
-    const block = document.getElementById('user_avatar_block');
-    if (!block) return;
-    // 清掉旧的手柄
-    block.querySelectorAll('.pg-drag-handle').forEach(h => h.remove());
-    if (!state.sortMode) return;
-
-    // 给每个人设卡片加手柄
-    block.querySelectorAll('.avatar-container').forEach(c => {
-        const handle = document.createElement('div');
-        handle.className = 'pg-drag-handle pg-drag-handle-card';
-        handle.title = '拖动排序';
-        handle.innerHTML = '<i class="fa-solid fa-grip-lines"></i>';
-        // 阻止点击穿透（避免触发卡片切换）
-        handle.addEventListener('click', e => { e.stopPropagation(); e.preventDefault(); });
-        c.appendChild(handle);
-    });
-
-    // 给每个分组 header 左侧加手柄
-    block.querySelectorAll(':scope > .pg-group-wrapper').forEach(w => {
-        const header = w.querySelector('.pg-group-header');
-        if (!header) return;
-        const handle = document.createElement('div');
-        handle.className = 'pg-drag-handle pg-drag-handle-group';
-        handle.title = '拖动分组';
-        handle.innerHTML = '<i class="fa-solid fa-grip-lines"></i>';
-        handle.addEventListener('click', e => { e.stopPropagation(); e.preventDefault(); });
-        // 插到 header 的最前面
-        header.insertBefore(handle, header.firstChild);
-    });
-}
-
 function updateSelectionCount() {
     const t = document.getElementById(TOOLBAR_ID);
     if (!t) return;
@@ -963,8 +1066,6 @@ function bindWrappers(block) {
             header.dataset.pgBound = '1';
             header.addEventListener('click', e => {
                 if (e.target.closest('.pg-group-actions')) return;
-                // 排序模式下点击 header 不要触发折叠（让位给拖拽）
-                if (state.sortMode) return;
                 toggleCollapse(gid);
                 refreshMain();
             });
@@ -988,129 +1089,6 @@ function bindWrappers(block) {
             });
         }
     });
-}
-
-// ========== 拖拽排序 (SortableJS) ==========
-async function loadSortable() {
-    if (window.Sortable) return window.Sortable;
-    // 尝试从酒馆 lib.js 拿
-    try {
-        const m = await import('/lib.js');
-        if (m.Sortable) {
-            window.Sortable = m.Sortable;
-            return m.Sortable;
-        }
-    } catch (e) { /* ignore */ }
-    return null;
-}
-
-function enableSortable(block) {
-    disableSortable();
-    loadSortable().then(Sortable => {
-        if (!Sortable) {
-            console.warn('[' + EXT_NAME + '] SortableJS 不可用，排序模式无法启用拖拽。');
-            return;
-        }
-        if (!state.sortMode) return;
-
-        block.classList.add('pg-sort-mode');
-
-        const commonOpts = {
-            animation: 150,
-            // 桌面立即拖；触摸设备稍微延迟避免与滚动冲突
-            delay: 0,
-            delayOnTouchOnly: true,
-            touchStartThreshold: 5,
-            // 触摸时若是从手柄开始，不要被浏览器吞掉
-            forceFallback: false,
-        };
-
-        // 1) 分组之间排序
-        const groupSortable = Sortable.create(block, {
-            ...commonOpts,
-            group: { name: 'pg-groups', pull: false, put: false },
-            draggable: '.pg-group-wrapper',
-            handle: '.pg-drag-handle-group',   // ⭐ 只能从分组手柄拖
-            onEnd: () => {
-                const order = Array.from(block.querySelectorAll(':scope > .pg-group-wrapper'))
-                    .map(w => w.dataset.gid)
-                    .filter(Boolean);
-                const gs = getGroups();
-                const map = new Map(gs.map(g => [g.id, g]));
-                const newArr = [];
-                for (const id of order) if (map.has(id)) { newArr.push(map.get(id)); map.delete(id); }
-                for (const g of map.values()) newArr.push(g);
-                extension_settings[KEY].groups = newArr;
-                saveGroups();
-            },
-        });
-        _sortableInstances.push(groupSortable);
-
-        // 2) 组内 + 未分组 + 跨组互拖
-        const bodies = block.querySelectorAll('.pg-group-body, .pg-ungrouped-wrapper');
-        bodies.forEach(body => {
-            const inst = Sortable.create(body, {
-                ...commonOpts,
-                group: { name: 'pg-personas', pull: true, put: true },
-                draggable: '.avatar-container',
-                handle: '.pg-drag-handle-card',   // ⭐ 只能从卡片手柄拖
-                onEnd: () => {
-                    persistPersonaOrders(block);
-                },
-            });
-            _sortableInstances.push(inst);
-        });
-    }).catch(err => {
-        console.error('[' + EXT_NAME + '] Failed to load Sortable:', err);
-    });
-}
-
-
-function disableSortable() {
-    while (_sortableInstances.length) {
-        const inst = _sortableInstances.pop();
-        try { inst.destroy(); } catch (e) {}
-    }
-    const block = document.getElementById('user_avatar_block');
-    if (block) block.classList.remove('pg-sort-mode');
-}
-
-/**
- * 拖拽结束后，按当前 DOM 状态把组内/未分组顺序写回存储。
- */
-function persistPersonaOrders(block) {
-    const groups = getGroups();
-    const groupMap = new Map(groups.map(g => [g.id, g]));
-
-    // 每个分组的 personas 按当前 DOM 顺序重写
-    block.querySelectorAll(':scope > .pg-group-wrapper').forEach(wrapper => {
-        const gid = wrapper.dataset.gid;
-        const g = groupMap.get(gid);
-        if (!g) return;
-        const cards = wrapper.querySelectorAll('.pg-group-body > .avatar-container');
-        const ids = [];
-        cards.forEach(c => {
-            const id = getCardAvatarId(c);
-            if (id) ids.push(id);
-        });
-        g.personas = ids;
-    });
-
-    // 未分组容器
-    const ung = block.querySelector(':scope > .pg-ungrouped-wrapper');
-    if (ung) {
-        const ids = [];
-        ung.querySelectorAll(':scope > .avatar-container').forEach(c => {
-            const id = getCardAvatarId(c);
-            if (id) ids.push(id);
-        });
-        // 把当前页的顺序合并进 ungroupedOrder：先把这些 id 从旧顺序里删掉，再按当前顺序放回原本位置（开头）
-        // 简化处理：排序模式下未分组是全量显示，直接整体覆盖
-        setUngroupedOrder(ids);
-    }
-
-    // 跨组拖拽可能导致某个人设从 A 组 -> 未分组 / B 组：上面两段已经覆盖了所有可见容器，剩余分组无变化
-    saveGroups();
 }
 
 // ========== 位置2：快捷弹窗 ==========
@@ -1295,8 +1273,7 @@ function renderQuick() {
         for (const a of ps) h += renderQuickAv(a);
         h += '</div></div>';
     }
-    let ung = all.filter(a => !grouped.has(a));
-    ung = applyUngroupedOrder(ung);
+    const ung = all.filter(a => !grouped.has(a));
     if (ung.length > 0) {
         h += '<div class="pg-quick-ungrouped"><div class="pg-quick-grid">';
         for (const a of ung) h += renderQuickAv(a);
@@ -1365,8 +1342,6 @@ jQuery(async () => {
     if (obs) {
         new MutationObserver(() => {
             if (isReorganizing) return;
-            // 拖拽过程中也会触发 MutationObserver，要跳过
-            if (state.sortMode) return;
             clearTimeout(window.__pg_reorg_timer);
             window.__pg_reorg_timer = setTimeout(reorganizeNative, 100);
         }).observe(obs, { childList: true, subtree: false });
