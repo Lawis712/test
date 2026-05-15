@@ -427,131 +427,139 @@ body.square-avatars .pg-quick-avatar { border-radius: 2px; }
     font-size: 0.85em;
     line-height: 1.4;
 }
-/* ====== 排序模式 ====== */
-.pg-btn-sortmode.pg-active {
-    background: var(--SmartThemeQuoteColor) !important;
-}
-
-/* 排序模式提示横幅 */
-.pg-sort-hint {
-    display: flex;
-    align-items: center;
-    padding: 6px 10px;
-    background: var(--black30a);
-    border: 1px dashed var(--SmartThemeQuoteColor);
-    border-radius: 6px;
-    font-size: 0.85em;
-    opacity: 0.95;
-}
-.pg-sort-hint .menu_button {
-    margin: 0;
-    padding: 3px 10px;
-    min-width: 56px;
-}
-
-/* ====== 拖拽手柄（仅排序模式下显示） ====== */
-.pg-drag-handle {
-    display: none;
-    align-items: center;
-    justify-content: center;
-    cursor: grab;
-    color: var(--SmartThemeBodyColor);
-    opacity: 0.75;
-    user-select: none;
-    -webkit-user-select: none;
-    /* 关键：禁掉触摸滚动手势，让拖拽事件能拿到 */
-    touch-action: none;
-    -webkit-touch-callout: none;
-    transition: opacity 0.15s, color 0.15s, background 0.15s;
-}
-.pg-drag-handle:hover {
-    opacity: 1;
-    color: var(--SmartThemeQuoteColor);
-}
-.pg-drag-handle:active {
-    cursor: grabbing;
-}
-
-/* 仅在排序模式下显示 */
-#user_avatar_block.pg-sort-mode .pg-drag-handle {
-    display: inline-flex;
-}
-
-/* —— 卡片上的手柄：左上角浮动 —— */
-.pg-drag-handle-card {
-    position: absolute;
-    top: 4px;
-    left: 4px;
-    z-index: 6;
-    width: 28px;
-    height: 28px;
-    border-radius: 4px;
-    background: var(--black50a);
-    backdrop-filter: blur(4px);
-    font-size: 14px;
-    border: 1px solid var(--SmartThemeBorderColor);
-}
-.pg-drag-handle-card:hover {
-    background: var(--SmartThemeQuoteColor);
-    color: var(--SmartThemeBodyColor);
-}
-
-/* 卡片在排序模式下需要相对定位以承载手柄；并加视觉提示 */
-#user_avatar_block.pg-sort-mode .avatar-container {
+/* ===== 同名合并：徽章 ===== */
+.avatar-container.pg-cluster-rep {
     position: relative;
 }
-#user_avatar_block.pg-sort-mode .avatar-container::after {
-    content: '';
+.pg-cluster-badge {
     position: absolute;
-    inset: 0;
-    border: 1px dashed var(--SmartThemeQuoteColor);
+    top: 4px;
+    right: 4px;
+    z-index: 5;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 7px;
+    border-radius: 10px;
+    background: rgba(120, 80, 200, 0.85);
+    color: #fff;
+    font-size: 11px;
+    font-weight: bold;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+    user-select: none;
+    transition: transform 0.12s ease, background 0.15s ease;
+}
+.pg-cluster-badge:hover {
+    background: rgba(150, 100, 230, 1);
+    transform: scale(1.08);
+}
+.pg-cluster-badge i {
+    font-size: 10px;
+}
+.avatar-container.pg-cluster-expanded .pg-cluster-badge {
+    background: rgba(200, 130, 60, 0.95);
+}
+
+/* ===== 变体抽屉 ===== */
+.pg-variant-drawer {
+    margin: 4px 0 10px 0;
+    padding: 6px 8px;
+    background: rgba(255, 255, 255, 0.04);
+    border-left: 3px solid rgba(120, 80, 200, 0.6);
     border-radius: 4px;
-    pointer-events: none;
-    opacity: 0.4;
 }
-
-/* —— 分组 header 上的手柄：放在最左 —— */
-.pg-drag-handle-group {
-    width: 28px;
-    height: 28px;
-    border-radius: 4px;
-    font-size: 15px;
-    flex-shrink: 0;
-}
-.pg-drag-handle-group:hover {
-    background: var(--white20a);
-}
-
-/* 排序模式下 header 整体不再 cursor:grab，光标只在手柄上 */
-#user_avatar_block.pg-sort-mode .pg-group-header {
-    cursor: default;
-}
-
-/* 未分组容器（排序模式时使用，复用分组 body 的样式） */
-.pg-ungrouped-wrapper {
+.pg-variant-list {
     display: flex;
     flex-direction: column;
-    gap: 5px;
-    padding: 8px 0;
-    width: 100%;
-    grid-column: 1 / -1;
+    gap: 4px;
 }
-#user_avatar_block.gridView .pg-ungrouped-wrapper {
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: 5px;
+.pg-variant-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.12s ease, border-color 0.12s ease;
+}
+.pg-variant-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(120, 80, 200, 0.5);
+}
+.pg-variant-item.pg-current {
+    background: rgba(120, 80, 200, 0.18);
+    border-color: rgba(120, 80, 200, 0.7);
+}
+.pg-variant-main {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+}
+.pg-variant-name {
+    font-size: 13px;
+    font-weight: bold;
+    opacity: 0.85;
+}
+.pg-variant-sub {
+    font-size: 12px;
+    opacity: 0.65;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.pg-variant-tags {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+.pg-variant-tag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    font-size: 10px;
+    font-weight: bold;
+}
+.pg-tag-bound {
+    background: rgba(60, 160, 100, 0.3);
+    color: #a0e0c0;
+}
+.pg-tag-current {
+    background: rgba(220, 180, 60, 0.3);
+    color: #ffd87a;
 }
 
-/* SortableJS 拖拽视觉反馈 */
-.sortable-ghost {
-    opacity: 0.35;
-    background: var(--SmartThemeQuoteColor) !important;
+/* ===== 工具栏合并按钮 active 状态 ===== */
+.pg-btn-toggle-merge.pg-active {
+    background: rgba(120, 80, 200, 0.3) !important;
+    border-color: rgba(120, 80, 200, 0.6) !important;
 }
-.sortable-chosen {
-    outline: 2px solid var(--SmartThemeQuoteColor);
-    outline-offset: -2px;
-    border-radius: 4px;
-}
-.sortable-drag {
+
+/* ===== 合并模式提示条 ===== */
+.pg-merge-hint {
+    margin-top: 6px;
+    padding: 5px 10px;
+    background: rgba(120, 80, 200, 0.08);
+    border-left: 3px solid rgba(120, 80, 200, 0.5);
+    border-radius: 3px;
+    font-size: 12px;
     opacity: 0.85;
+}
+.pg-merge-hint-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: rgba(120, 80, 200, 0.85);
+    color: #fff;
+    font-size: 10px;
+    font-weight: bold;
+    margin: 0 2px;
 }
