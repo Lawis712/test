@@ -145,7 +145,6 @@
     margin-left: 6px;
 }
 
-/* ⭐ 窄屏只缩紧分页栏内边距，不再隐藏首页/末页按钮 */
 @media (max-width: 480px) {
     .pg-pager-inner {
         gap: 4px;
@@ -166,7 +165,6 @@
     }
 }
 
-/* 隐藏原生分页栏 */
 .pg-hide-native-pager {
     display: none !important;
 }
@@ -243,7 +241,6 @@
     gap: 5px;
 }
 
-/* 空分组提示 */
 .pg-empty-hint {
     text-align: center;
     padding: 16px 8px;
@@ -312,7 +309,7 @@ body.square-avatars #pg-quick-btn .pg-quick-btn-img {
     color: var(--SmartThemeQuoteColor);
 }
 
-/* ====== 快捷弹窗（PC 默认尺寸）====== */
+/* ====== 快捷弹窗 ====== */
 .pg-quick-popup {
     position: fixed;
     width: 320px;
@@ -356,7 +353,6 @@ body.square-avatars #pg-quick-btn .pg-quick-btn-img {
     font-size: 0.85em;
 }
 
-/* 弹窗里的头像网格：5列 */
 .pg-quick-grid {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
@@ -386,7 +382,6 @@ body.square-avatars .pg-quick-avatar { border-radius: 2px; }
 }
 .pg-quick-avatar.pg-current { border-color: var(--SmartThemeQuoteColor); }
 
-/* ⭐ 移动端弹窗：高度占屏幕 1/3，宽度更窄，仍保持 5 列 */
 @media (max-width: 768px) {
     .pg-quick-popup {
         width: 270px;
@@ -405,7 +400,6 @@ body.square-avatars .pg-quick-avatar { border-radius: 2px; }
     }
 }
 
-/* 极窄屏依然保持 5 列（用户要求） */
 @media (max-width: 380px) {
     .pg-quick-grid {
         grid-template-columns: repeat(5, 1fr);
@@ -430,7 +424,6 @@ body.square-avatars .pg-quick-avatar { border-radius: 2px; }
 }
 
 /* ====== 排序模式 ====== */
-/* 排序模式提示横幅 */
 .pg-sort-hint {
     display: flex;
     align-items: center;
@@ -447,8 +440,8 @@ body.square-avatars .pg-quick-avatar { border-radius: 2px; }
     min-width: 56px;
 }
 
-/* 拖拽手柄：覆盖在整张人设卡上，完全透明，吸收所有点击/拖拽 */
-.pg-drag-handle-card {
+/* ⭐ 拖拽手柄：只覆盖头像区域（不是整张卡片） */
+.pg-drag-handle-avatar {
     position: absolute !important;
     top: 0;
     left: 0;
@@ -459,29 +452,22 @@ body.square-avatars .pg-quick-avatar { border-radius: 2px; }
     z-index: 50;
     cursor: grab;
     background: transparent;
-    /* 关键：禁掉浏览器触摸滚动手势，让 SortableJS 能拿到 */
     touch-action: none;
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
+    border-radius: inherit;
 }
-.pg-drag-handle-card:active {
+.pg-drag-handle-avatar:active {
     cursor: grabbing;
 }
 
-/* 排序模式下：卡片必须能承载绝对定位的手柄，并加一个虚线提示框 */
-#user_avatar_block.pg-sort-mode .avatar-container {
-    position: relative;
-}
-#user_avatar_block.pg-sort-mode .avatar-container::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border: 1px dashed var(--SmartThemeQuoteColor);
+/* 排序模式下：给头像加一个虚线高亮提示"这里可拖" */
+#user_avatar_block.pg-sort-mode .avatar-container .avatar,
+#user_avatar_block.pg-sort-mode .avatar-container > img {
+    outline: 2px dashed var(--SmartThemeQuoteColor);
+    outline-offset: 2px;
     border-radius: 4px;
-    pointer-events: none;
-    opacity: 0.5;
-    z-index: 49;
 }
 
 /* 排序模式下：分组 header 整体作为拖动把手 */
@@ -491,12 +477,11 @@ body.square-avatars .pg-quick-avatar { border-radius: 2px; }
 #user_avatar_block.pg-sort-mode .pg-group-header:active {
     cursor: grabbing;
 }
-/* 但 header 上的重命名/删除按钮要保留正常光标 */
 #user_avatar_block.pg-sort-mode .pg-group-actions i {
     cursor: pointer;
 }
 
-/* 未分组容器（排序模式时使用，复用分组 body 的样式） */
+/* 未分组容器 */
 .pg-ungrouped-wrapper {
     display: flex;
     flex-direction: column;
