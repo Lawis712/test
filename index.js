@@ -135,27 +135,20 @@ function getName(a) {
     if (raw.length > 200 || raw.includes('\n')) return a;
     return raw || a;
 }
+function getAvatarUrl(a) { return '/thumbnail?type=persona&file=' + encodeURIComponent(a); }
 
-/** 获取 persona 的备注（title） */
-function getTitle(a) {
+/* ⭐ 需求3/4：读取 persona 的 title 和 description */
+function getPersonaTitle(a) {
     const desc = (power_user.persona_descriptions || {})[a];
     if (!desc) return '';
-    const t = desc.title;
-    return (typeof t === 'string') ? t : '';
+    return (typeof desc.title === 'string') ? desc.title : '';
+}
+function getPersonaDescription(a) {
+    const desc = (power_user.persona_descriptions || {})[a];
+    if (!desc) return '';
+    return (typeof desc.description === 'string') ? desc.description : '';
 }
 
-/** 搜索匹配：匹配名字 OR 备注（title），不区分大小写 */
-function personaMatchesSearch(avatar, term) {
-    if (!term) return true;
-    const t = term.toLowerCase();
-    const name = getName(avatar).toLowerCase();
-    if (name.includes(t)) return true;
-    const title = getTitle(avatar).toLowerCase();
-    if (title && title.includes(t)) return true;
-    return false;
-}
-
-function getAvatarUrl(a) { return '/thumbnail?type=persona&file=' + encodeURIComponent(a); }
 function isBound(a) {
     const desc = (power_user.persona_descriptions || {})[a];
     if (desc) {
@@ -211,6 +204,21 @@ function applyUngroupedOrder(ungroupedAvatars) {
     return ordered;
 }
 
+/* ⭐ 需求3：判断 persona 是否匹配搜索词（name + title + description） */
+function matchesSearch(avatar, query) {
+    if (!query) return true;
+    const q = query.toLowerCase();
+    const name = getName(avatar).toLowerCase();
+    if (name.includes(q)) return true;
+    const title = getPersonaTitle(avatar).toLowerCase();
+    if (title.includes(q)) return true;
+    const desc = getPersonaDescription(avatar).toLowerCase();
+    if (desc.includes(q)) return true;
+    // 兜底：原始 avatar 文件名
+    if (avatar.toLowerCase().includes(q)) return true;
+    return false;
+}
+
 // ========== ST API ==========
 let _setUserAvatar = null;
 let _getUserAvatars = null;
@@ -259,9 +267,6 @@ let isReorganizing = false;
 // SortableJS 实例缓存
 const _sortableInstances = [];
 
-// 搜索 debounce 计时器
-let _searchDebounceTimer = null;
-
 // ========== 扩展设置面板 ==========
 function initExtensionSettings() {
     const container = document.getElementById('extensions_settings2') || document.getElementById('extensions_settings');
@@ -292,7 +297,7 @@ function initExtensionSettings() {
                             <span>启用排序按钮（在工具栏显示，可拖拽分组与人设）</span>
                         </label>
                         <small class="pg-setting-hint" style="opacity:0.7; margin-top:4px; font-style:italic;">
-                            开启后工具栏会多出一个"排序"按钮，点击进入排序模式；排序模式下可拖动分组、组内人设，以及跨组移动人设。
+                            开启后工具栏会多出一个"排序"按钮，点击进入排序模式；排序模式下按住头像即可拖动，可拖动分组、组内人设，以及跨组移动人设。
                         </small>
                     </div>
                 </div>
@@ -382,7 +387,7 @@ function initMainPanel() {
             toolbar.parentElement.insertBefore(pager, toolbar.nextSibling);
         }
         hideNativePagination();
-        hijackNativeSearch();
+        hijackNativeSearch();   // ⭐ 需求3：覆盖原生搜索
         renderToolbar();
         reorganizeNative();
     };
@@ -398,38 +403,30 @@ function hideNativePagination() {
     });
 }
 
-/**
- * 劫持酒馆原生的 persona 搜索框：
- * - 阻止原生事件处理（不再让酒馆自己去过滤卡片）
- * - 由扩展接管：匹配 name + title（备注），结果显示仍走扩展的 reorganizeNative
- * - 加 150ms debounce，避免连续打字时频繁重排
- */
+/* ⭐ 需求3：拦截原生搜索框，扩展自己做匹配 */
+let _searchDebounceTimer = null;
 function hijackNativeSearch() {
     const searchInput = document.getElementById('persona_search_bar');
     if (!searchInput) return;
-    if (searchInput.dataset.pgSearchHijacked) return;
-    searchInput.dataset.pgSearchHijacked = '1';
+    if (searchInput.dataset.pgHijacked === '1') return;
+    searchInput.dataset.pgHijacked = '1';
 
-    // 在捕获阶段拦截 input，阻止原生处理
+    // 在捕获阶段拦截，阻止原生 handler 接收事件
     const handler = (e) => {
-        // 阻止其他同事件监听器（包括酒馆自己的）继续执行
-        if (typeof e.stopImmediatePropagation === 'function') {
-            e.stopImmediatePropagation();
-        }
-        const term = (searchInput.value || '').trim();
-        if (_searchDebounceTimer) clearTimeout(_searchDebounceTimer);
+        e.stopImmediatePropagation();
+        const val = searchInput.value || '';
+        clearTimeout(_searchDebounceTimer);
         _searchDebounceTimer = setTimeout(() => {
-            state.search = term;
+            state.search = val;
             state.page = 0;
             reorganizeNative();
         }, 150);
     };
-    // 用捕获模式，确保比 jQuery 的 bubble 监听更早执行
     searchInput.addEventListener('input', handler, true);
-    searchInput.addEventListener('keyup', handler, true);
+    searchInput.addEventListener('change', handler, true);
 
-    // 初始同步
-    state.search = (searchInput.value || '').trim();
+    // 初始化一次
+    state.search = searchInput.value || '';
 }
 
 function refreshMain() {
@@ -469,7 +466,7 @@ function renderToolbar() {
     html += '<button class="menu_button pg-btn-selectmode' + (state.selectMode?' pg-active':'') + '" title="多选模式"><i class="fa-solid fa-check-double"></i></button>';
     html += '<button class="menu_button pg-btn-toggle-groups' + (hidden?' pg-active':'') + '" title="' + (hidden?'显示分组':'隐藏分组') + '"><i class="fa-solid ' + (hidden?'fa-eye-slash':'fa-eye') + '"></i></button>';
     if (isSortEnabled()) {
-        html += '<button class="menu_button pg-btn-sortmode' + (state.sortMode?' pg-active':'') + '" title="' + (state.sortMode?'退出排序模式':'排序模式（拖拽分组与人设）') + '"><i class="fa-solid fa-arrows-up-down-left-right"></i></button>';
+        html += '<button class="menu_button pg-btn-sortmode' + (state.sortMode?' pg-active':'') + '" title="' + (state.sortMode?'退出排序模式':'排序模式（按住头像拖动）') + '"><i class="fa-solid fa-arrows-up-down-left-right"></i></button>';
     }
     html += '</div>';
 
@@ -485,7 +482,7 @@ function renderToolbar() {
     }
 
     if (state.sortMode) {
-        html += '<div class="pg-sort-hint">🔀 排序模式：拖动分组/人设进行排序，点击不再切换人设。' +
+        html += '<div class="pg-sort-hint">🔀 排序模式：按住头像或分组标题拖动排序，点击不再切换人设。' +
             '<button class="menu_button pg-btn-exit-sort" style="margin-left:8px;">完成</button></div>';
     }
 
@@ -599,11 +596,11 @@ async function reorganizeNative() {
 
     disableSortable();
 
-    // ========== 搜索模式 ==========
+    /* ⭐ 需求3：搜索时使用扩展自己的匹配逻辑（不再让原生 hide 卡片）。
+       搜索状态下展平、不分组、不分页，结果走原有 reorganizeNative 主体逻辑。 */
     if (state.search.trim()) {
         isReorganizing = true;
         try {
-            // 先把分组解构掉，把所有 avatar-container 移回 block 根
             block.querySelectorAll(':scope > .pg-group-wrapper').forEach(w => {
                 const body = w.querySelector('.pg-group-body');
                 if (body) {
@@ -625,16 +622,15 @@ async function reorganizeNative() {
 
             await ensureAllCardsInDom();
 
-            // 按 name + title 匹配显示/隐藏
-            const term = state.search.trim();
+            // 扩展自己做搜索匹配（name + title + description）
+            const q = state.search.trim();
             block.querySelectorAll(':scope > .avatar-container').forEach(c => {
                 const id = getCardAvatarId(c);
                 if (!id) { c.style.display = 'none'; return; }
-                c.style.display = personaMatchesSearch(id, term) ? '' : 'none';
+                c.style.display = matchesSearch(id, q) ? '' : 'none';
             });
 
             applySelectModeUI();
-            applySortModeUI();
             const pager = document.getElementById(PAGER_ID);
             if (pager) pager.style.display = 'none';
         } finally {
@@ -807,7 +803,7 @@ async function reorganizeNative() {
         }
 
         applySelectModeUI();
-        applySortModeUI();
+        applySortModeUI();          // ⭐ 排序模式：渲染头像上的透明手柄
         bindWrappers(block);
         renderPager(totalPages);
 
@@ -948,33 +944,6 @@ function applySelectModeUI() {
     });
 }
 
-function applySortModeUI() {
-    const block = document.getElementById('user_avatar_block');
-    if (!block) return;
-    block.querySelectorAll('.pg-drag-handle').forEach(h => h.remove());
-    if (!state.sortMode) return;
-
-    block.querySelectorAll('.avatar-container').forEach(c => {
-        const handle = document.createElement('div');
-        handle.className = 'pg-drag-handle pg-drag-handle-card';
-        handle.title = '拖动排序';
-        handle.innerHTML = '<i class="fa-solid fa-grip-lines"></i>';
-        handle.addEventListener('click', e => { e.stopPropagation(); e.preventDefault(); });
-        c.appendChild(handle);
-    });
-
-    block.querySelectorAll(':scope > .pg-group-wrapper').forEach(w => {
-        const header = w.querySelector('.pg-group-header');
-        if (!header) return;
-        const handle = document.createElement('div');
-        handle.className = 'pg-drag-handle pg-drag-handle-group';
-        handle.title = '拖动分组';
-        handle.innerHTML = '<i class="fa-solid fa-grip-lines"></i>';
-        handle.addEventListener('click', e => { e.stopPropagation(); e.preventDefault(); });
-        header.insertBefore(handle, header.firstChild);
-    });
-}
-
 function updateSelectionCount() {
     const t = document.getElementById(TOOLBAR_ID);
     if (!t) return;
@@ -995,6 +964,29 @@ function interceptInSelectMode(e) {
     updateSelectionCount();
 }
 
+/* ⭐ 排序模式：在每张头像上覆盖一个透明拖拽手柄，分组 header 整体作为分组手柄 */
+function applySortModeUI() {
+    const block = document.getElementById('user_avatar_block');
+    if (!block) return;
+    // 清除旧手柄
+    block.querySelectorAll('.pg-drag-handle').forEach(h => h.remove());
+    block.classList.toggle('pg-sort-mode', !!state.sortMode);
+    if (!state.sortMode) return;
+
+    // 给每张人设卡覆盖一个透明手柄（覆盖整张卡，让"拖头像就能拖"）
+    block.querySelectorAll('.avatar-container').forEach(c => {
+        // 卡片必须可定位手柄
+        if (getComputedStyle(c).position === 'static') {
+            c.style.position = 'relative';
+        }
+        const handle = document.createElement('div');
+        handle.className = 'pg-drag-handle pg-drag-handle-card';
+        // 阻止点击穿透到原生切换逻辑（虽然我们 click 里也判断了 sortMode，但双保险）
+        handle.addEventListener('click', e => { e.stopPropagation(); e.preventDefault(); });
+        c.appendChild(handle);
+    });
+}
+
 function bindWrappers(block) {
     block.querySelectorAll(':scope > .pg-group-wrapper').forEach(div => {
         const gid = div.dataset.gid;
@@ -1003,7 +995,6 @@ function bindWrappers(block) {
             header.dataset.pgBound = '1';
             header.addEventListener('click', e => {
                 if (e.target.closest('.pg-group-actions')) return;
-                if (e.target.closest('.pg-drag-handle')) return;
                 if (state.sortMode) return;
                 toggleCollapse(gid);
                 refreshMain();
@@ -1052,8 +1043,6 @@ function enableSortable(block) {
         }
         if (!state.sortMode) return;
 
-        block.classList.add('pg-sort-mode');
-
         const commonOpts = {
             animation: 150,
             delay: 0,
@@ -1062,11 +1051,14 @@ function enableSortable(block) {
             forceFallback: false,
         };
 
+        // 1) 分组排序：拖分组 header 移动整个分组
         const groupSortable = Sortable.create(block, {
             ...commonOpts,
             group: { name: 'pg-groups', pull: false, put: false },
             draggable: '.pg-group-wrapper',
-            handle: '.pg-drag-handle-group',
+            handle: '.pg-group-header',
+            filter: '.pg-group-actions, .pg-group-actions *, .pg-toggle',
+            preventOnFilter: false,
             onEnd: () => {
                 const order = Array.from(block.querySelectorAll(':scope > .pg-group-wrapper'))
                     .map(w => w.dataset.gid)
@@ -1082,6 +1074,7 @@ function enableSortable(block) {
         });
         _sortableInstances.push(groupSortable);
 
+        // 2) 组内 / 未分组 / 跨组 卡片排序：通过覆盖在头像上的透明手柄
         const bodies = block.querySelectorAll('.pg-group-body, .pg-ungrouped-wrapper');
         bodies.forEach(body => {
             const inst = Sortable.create(body, {
@@ -1091,6 +1084,9 @@ function enableSortable(block) {
                 handle: '.pg-drag-handle-card',
                 onEnd: () => {
                     persistPersonaOrders(block);
+                    // 拖动后 DOM 顺序变了，需要重新挂手柄到正确位置（其实手柄是跟着卡片走的，但样式可能需要刷一下）
+                    applySortModeUI();
+                    enableSortable(block); // 重新绑定 Sortable 以包含新位置的容器（跨组移动后必要）
                 },
             });
             _sortableInstances.push(inst);
@@ -1350,16 +1346,12 @@ function renderQuick() {
     });
 }
 
-/**
- * 快捷弹窗里的单个头像格子。
- * hover tooltip 显示：名字 + 备注（title）
- */
+/* ⭐ 需求4：渲染快捷弹窗头像时，title 改为 "名字\n备注" */
 function renderQuickAv(a) {
     const name = getName(a);
-    const title = getTitle(a);
-    // 组合 tooltip：有备注则显示 "名字\n备注"，没备注就只显示名字
-    const tip = title ? (name + '\n' + title) : name;
-    return '<div class="pg-quick-avatar' + (isCurrent(a)?' pg-current':'') + '" data-avatar="' + esc(a) + '" title="' + esc(tip) + '"><img src="' + getAvatarUrl(a) + '" alt="' + esc(name) + '"></div>';
+    const titleNote = getPersonaTitle(a);
+    const tooltip = titleNote ? (name + '\n' + titleNote) : name;
+    return '<div class="pg-quick-avatar' + (isCurrent(a)?' pg-current':'') + '" data-avatar="' + esc(a) + '" title="' + esc(tooltip) + '"><img src="' + getAvatarUrl(a) + '"></div>';
 }
 
 // ========== 入口 ==========
