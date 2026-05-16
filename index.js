@@ -258,7 +258,6 @@ async function switchPersona(avatar) {
 const state = { selectMode: false, sortMode: false, selected: new Set(), filter: 'all', page: 0, search: '' };
 let isReorganizing = false;
 
-// SortableJS 实例缓存
 const _sortableInstances = [];
 
 // ========== 扩展设置面板 ==========
@@ -473,7 +472,7 @@ function renderToolbar() {
     }
 
     if (state.sortMode) {
-        html += '<div class="pg-sort-hint">🔀 排序模式：按住头像或分组标题拖动排序，点击不再切换人设。' +
+        html += '<div class="pg-sort-hint">🔀 排序模式：按住<b>头像</b>拖动人设，按住<b>分组标题</b>拖动整个分组。' +
             '<button class="menu_button pg-btn-exit-sort" style="margin-left:8px;">完成</button></div>';
     }
 
@@ -748,6 +747,7 @@ async function reorganizeNative() {
 
                     const body = document.createElement('div');
                     body.className = 'pg-group-body';
+                    body.dataset.gid = g.id;     // ⭐ 在 body 上也记录 gid，方便持久化
                     if (!g.collapsed && totalPersonasInGroup > 0) {
                         for (const a of g.personas) {
                             if (cardMap.has(a) && passFilter(a)) {
@@ -952,6 +952,7 @@ function interceptInSelectMode(e) {
     updateSelectionCount();
 }
 
+/* ⭐ 排序模式：手柄只覆盖在头像 img 上，不覆盖文字部分 */
 function applySortModeUI() {
     const block = document.getElementById('user_avatar_block');
     if (!block) return;
@@ -960,13 +961,18 @@ function applySortModeUI() {
     if (!state.sortMode) return;
 
     block.querySelectorAll('.avatar-container').forEach(c => {
-        if (getComputedStyle(c).position === 'static') {
-            c.style.position = 'relative';
+        // 找到头像元素：优先 .avatar，否则用第一个 img
+        const avatarEl = c.querySelector('.avatar') || c.querySelector('img');
+        if (!avatarEl) return;
+
+        // 确保头像元素能定位手柄
+        if (getComputedStyle(avatarEl).position === 'static') {
+            avatarEl.style.position = 'relative';
         }
         const handle = document.createElement('div');
-        handle.className = 'pg-drag-handle pg-drag-handle-card';
+        handle.className = 'pg-drag-handle pg-drag-handle-avatar';
         handle.addEventListener('click', e => { e.stopPropagation(); e.preventDefault(); });
-        c.appendChild(handle);
+        avatarEl.appendChild(handle);
     });
 }
 
@@ -1005,26 +1011,13 @@ function bindWrappers(block) {
 }
 
 // ========== 拖拽排序 (SortableJS) ==========
-// ⭐ 多路径加载，最后回退到 CDN
 async function loadSortable() {
     if (window.Sortable) return window.Sortable;
-
-    // 方式1：尝试从 ST 的 lib.js（不同版本可能有/没有）
     try {
         const m = await import('/lib.js');
-        if (m.Sortable) {
-            window.Sortable = m.Sortable;
-            console.log('[' + EXT_NAME + '] SortableJS loaded from /lib.js');
-            return m.Sortable;
-        }
-        if (m.default && m.default.Sortable) {
-            window.Sortable = m.default.Sortable;
-            console.log('[' + EXT_NAME + '] SortableJS loaded from /lib.js (default)');
-            return m.default.Sortable;
-        }
+        if (m.Sortable) { window.Sortable = m.Sortable; return m.Sortable; }
+        if (m.default && m.default.Sortable) { window.Sortable = m.default.Sortable; return m.default.Sortable; }
     } catch (e) { /* 静默 */ }
-
-    // 方式2：从 CDN 加载（jsdelivr）
     try {
         await new Promise((resolve, reject) => {
             const s = document.createElement('script');
@@ -1033,15 +1026,10 @@ async function loadSortable() {
             s.onerror = reject;
             document.head.appendChild(s);
         });
-        if (window.Sortable) {
-            console.log('[' + EXT_NAME + '] SortableJS loaded from jsdelivr CDN');
-            return window.Sortable;
-        }
+        if (window.Sortable) return window.Sortable;
     } catch (e) {
         console.warn('[' + EXT_NAME + '] jsdelivr CDN failed, trying unpkg...');
     }
-
-    // 方式3：备用 CDN（unpkg）
     try {
         await new Promise((resolve, reject) => {
             const s = document.createElement('script');
@@ -1050,14 +1038,10 @@ async function loadSortable() {
             s.onerror = reject;
             document.head.appendChild(s);
         });
-        if (window.Sortable) {
-            console.log('[' + EXT_NAME + '] SortableJS loaded from unpkg CDN');
-            return window.Sortable;
-        }
+        if (window.Sortable) return window.Sortable;
     } catch (e) {
         console.error('[' + EXT_NAME + '] All Sortable loading methods failed:', e);
     }
-
     return null;
 }
 
@@ -1065,8 +1049,7 @@ function enableSortable(block) {
     disableSortable();
     loadSortable().then(Sortable => {
         if (!Sortable) {
-            console.warn('[' + EXT_NAME + '] SortableJS 不可用，排序模式无法启用拖拽。请检查网络是否可访问 jsdelivr.net 或 unpkg.com。');
-            // 在工具栏提示横幅里显示错误
+            console.warn('[' + EXT_NAME + '] SortableJS 不可用。');
             const hint = document.querySelector('.pg-sort-hint');
             if (hint) {
                 hint.innerHTML = '⚠️ 拖拽库加载失败，请检查网络（需访问 cdn.jsdelivr.net 或 unpkg.com）。' +
@@ -1114,18 +1097,24 @@ function enableSortable(block) {
         });
         _sortableInstances.push(groupSortable);
 
-        // 2) 卡片排序
+        // 2) 卡片排序（用头像上的透明手柄）
         const bodies = block.querySelectorAll('.pg-group-body, .pg-ungrouped-wrapper');
         bodies.forEach(body => {
             const inst = Sortable.create(body, {
                 ...commonOpts,
                 group: { name: 'pg-personas', pull: true, put: true },
                 draggable: '.avatar-container',
-                handle: '.pg-drag-handle-card',
+                handle: '.pg-drag-handle-avatar',
                 onEnd: () => {
+                    // ⭐ 关键修复：先持久化，再延迟重建 UI
                     persistPersonaOrders(block);
-                    applySortModeUI();
-                    enableSortable(block);
+                    // 用 setTimeout 让 SortableJS 内部状态先稳定下来
+                    setTimeout(() => {
+                        if (state.sortMode) {
+                            applySortModeUI();
+                            enableSortable(block);
+                        }
+                    }, 50);
                 },
             });
             _sortableInstances.push(inst);
@@ -1146,34 +1135,68 @@ function disableSortable() {
     if (block) block.classList.remove('pg-sort-mode');
 }
 
+/* ⭐ 修复：用更鲁棒的选择器收集卡片，并加防御性保护 */
 function persistPersonaOrders(block) {
     const groups = getGroups();
     const groupMap = new Map(groups.map(g => [g.id, g]));
 
-    block.querySelectorAll(':scope > .pg-group-wrapper').forEach(wrapper => {
-        const gid = wrapper.dataset.gid;
-        const g = groupMap.get(gid);
-        if (!g) return;
-        const cards = wrapper.querySelectorAll('.pg-group-body > .avatar-container');
+    // 1) 收集所有分组 body 内的卡片
+    // 用 body.dataset.gid（在创建 body 时记录的）来匹配分组
+    const allGroupBodies = block.querySelectorAll('.pg-group-body[data-gid]');
+    const newGroupPersonas = new Map();   // gid -> [avatarIds]
+
+    allGroupBodies.forEach(body => {
+        const gid = body.dataset.gid;
+        if (!gid) return;
         const ids = [];
-        cards.forEach(c => {
-            const id = getCardAvatarId(c);
-            if (id) ids.push(id);
+        // 用 children 而不是 querySelectorAll，避免 ungrouped wrapper 那种嵌套
+        Array.from(body.children).forEach(child => {
+            if (child.classList && child.classList.contains('avatar-container')) {
+                const id = getCardAvatarId(child);
+                if (id) ids.push(id);
+            }
         });
-        g.personas = ids;
+        newGroupPersonas.set(gid, ids);
     });
 
+    // 2) 收集未分组容器的顺序
     const ung = block.querySelector(':scope > .pg-ungrouped-wrapper');
+    let newUngroupedOrder = null;
     if (ung) {
         const ids = [];
-        ung.querySelectorAll(':scope > .avatar-container').forEach(c => {
-            const id = getCardAvatarId(c);
-            if (id) ids.push(id);
+        Array.from(ung.children).forEach(child => {
+            if (child.classList && child.classList.contains('avatar-container')) {
+                const id = getCardAvatarId(child);
+                if (id) ids.push(id);
+            }
         });
-        setUngroupedOrder(ids);
+        newUngroupedOrder = ids;
     }
 
-    saveGroups();
+    // 3) 防御性检查：只更新有数据的分组
+    // 如果某个 group 在 DOM 里没找到（比如折叠的、被过滤掉的），保留它原本的数据
+    let changed = false;
+    for (const g of groups) {
+        if (newGroupPersonas.has(g.id)) {
+            const newList = newGroupPersonas.get(g.id);
+            // 双重保护：如果新列表是空的，但旧列表不是空的，说明 DOM 还没稳定 → 跳过
+            if (newList.length === 0 && g.personas.length > 0) {
+                console.warn('[' + EXT_NAME + '] 检测到分组 "' + g.name + '" DOM 收集为空但原本非空，跳过该分组的持久化（防止数据丢失）');
+                continue;
+            }
+            if (JSON.stringify(g.personas) !== JSON.stringify(newList)) {
+                g.personas = newList;
+                changed = true;
+            }
+        }
+    }
+
+    if (newUngroupedOrder !== null) {
+        setUngroupedOrder(newUngroupedOrder);
+        changed = true;
+    }
+
+    if (changed) saveGroups();
 }
 
 // ========== 位置2：快捷弹窗 ==========
