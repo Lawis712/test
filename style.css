@@ -1,438 +1,435 @@
-/* ============================================================
- * SillyTavern Persona Groups (用户人设分组)
- * style.css
- * ============================================================ */
-
-/* ====== 隐藏原生分页（被扩展接管） ====== */
-.pg-hide-native-pager {
-    display: none !important;
-}
-
-/* ====== 工具栏 ====== */
+/* ====== 工具栏（位置1顶部）====== */
 .pg-toolbar-container {
-    margin: 8px 0;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
+    padding: 8px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 6px;
+    margin-bottom: 8px;
+    background: var(--SmartThemeBlurTintColor);
 }
 
 .pg-toolbar {
     display: flex;
-    flex-wrap: wrap;
     gap: 6px;
-    align-items: center;
+    align-items: stretch;
+    flex-wrap: nowrap;
+    width: 100%;
 }
-
 .pg-toolbar .pg-filter {
-    flex: 1;
-    min-width: 120px;
-    padding: 4px 8px;
-    background: var(--black50a);
+    flex: 1 1 auto;
+    min-width: 0;
+    background: var(--black30a);
     color: var(--SmartThemeBodyColor);
     border: 1px solid var(--SmartThemeBorderColor);
     border-radius: 4px;
-    font-size: 0.9em;
+    padding: 4px 6px;
 }
-
 .pg-toolbar .menu_button {
+    flex: 0 0 auto;
     margin: 0;
-    padding: 4px 10px;
-    min-width: auto;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    min-width: 38px;
+    padding: 4px 8px;
 }
-
-.pg-toolbar .menu_button.pg-active {
+.pg-btn-selectmode.pg-active,
+.pg-btn-toggle-groups.pg-active,
+.pg-btn-sortmode.pg-active {
     background: var(--SmartThemeQuoteColor) !important;
-    color: var(--SmartThemeBodyColor);
 }
 
-/* ====== 多选模式选择栏 ====== */
+/* ====== 多选操作栏 ====== */
 .pg-selection-bar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
+    display: grid;
+    grid-template-columns: auto 1fr auto auto;
+    gap: 8px;
     align-items: center;
-    padding: 6px 10px;
+    padding: 8px 10px;
     background: var(--black30a);
     border: 1px solid var(--SmartThemeBorderColor);
-    border-radius: 4px;
-    font-size: 0.9em;
+    border-radius: 6px;
 }
-
 .pg-selection-bar > span {
-    flex-shrink: 0;
+    font-size: 0.9em;
+    white-space: nowrap;
+    opacity: 0.85;
 }
-
+.pg-selection-bar > span b {
+    color: var(--SmartThemeQuoteColor);
+    font-size: 1.1em;
+    margin: 0 2px;
+}
 .pg-selection-bar .pg-move-target {
-    flex: 1;
-    min-width: 120px;
-    padding: 4px 8px;
-    background: var(--black50a);
+    min-width: 0;
+    width: 100%;
+    background: var(--black30a);
     color: var(--SmartThemeBodyColor);
     border: 1px solid var(--SmartThemeBorderColor);
     border-radius: 4px;
+    padding: 4px 6px;
 }
-
 .pg-selection-bar .menu_button {
     margin: 0;
-    padding: 4px 10px;
+    padding: 4px 12px;
+    min-width: 56px;
+    white-space: nowrap;
+}
+.pg-selection-bar .pg-btn-move {
+    background: var(--SmartThemeQuoteColor);
+    color: var(--SmartThemeBodyColor);
+    font-weight: bold;
+}
+.pg-selection-bar .pg-btn-move:hover { filter: brightness(1.15); }
+.pg-selection-bar .pg-btn-clear-sel { opacity: 0.75; }
+.pg-selection-bar .pg-btn-clear-sel:hover { opacity: 1; }
+
+@media (max-width: 600px) {
+    .pg-selection-bar {
+        grid-template-columns: 1fr 1fr;
+        grid-template-areas:
+            "info info"
+            "select select"
+            "move clear";
+    }
+    .pg-selection-bar > span { grid-area: info; }
+    .pg-selection-bar .pg-move-target { grid-area: select; }
+    .pg-selection-bar .pg-btn-move { grid-area: move; }
+    .pg-selection-bar .pg-btn-clear-sel { grid-area: clear; }
 }
 
-/* ====== 分页器 ====== */
+/* ====== 自定义分页栏 ====== */
 .pg-pager {
-    margin: 8px 0;
+    margin-bottom: 8px;
 }
-
 .pg-pager-inner {
     display: flex;
-    gap: 4px;
+    gap: 6px;
     align-items: center;
     justify-content: center;
-    flex-wrap: wrap;
+    padding: 6px 10px;
+    background: var(--black20a);
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 6px;
+    font-size: 0.9em;
+    flex-wrap: nowrap;
+    overflow: hidden;
+    box-sizing: border-box;
 }
-
 .pg-pager .menu_button {
     margin: 0;
     padding: 4px 10px;
     min-width: 36px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    flex-shrink: 0;
 }
-
-.pg-pager .menu_button[disabled] {
+.pg-pager .menu_button:disabled {
     opacity: 0.4;
     cursor: not-allowed;
-    pointer-events: none;
 }
-
 .pg-pager-info {
-    margin: 0 8px;
-    font-size: 0.9em;
-    color: var(--SmartThemeBodyColor);
-    opacity: 0.85;
     min-width: 50px;
     text-align: center;
+    opacity: 0.9;
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+    padding: 0 4px;
 }
-
 .pg-pager-size {
-    margin-left: 6px;
-    padding: 4px 8px;
-    background: var(--black50a);
+    background: var(--black30a);
     color: var(--SmartThemeBodyColor);
     border: 1px solid var(--SmartThemeBorderColor);
     border-radius: 4px;
-    font-size: 0.85em;
+    padding: 3px 6px;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 70px;
+    margin-left: 6px;
+}
+
+/* ⭐ 窄屏只缩紧分页栏内边距，不再隐藏首页/末页按钮 */
+@media (max-width: 480px) {
+    .pg-pager-inner {
+        gap: 4px;
+        padding: 5px 8px;
+    }
+    .pg-pager .menu_button {
+        min-width: 32px;
+        padding: 3px 6px;
+    }
+    .pg-pager-info {
+        min-width: 40px;
+        padding: 0 2px;
+        font-size: 0.85em;
+    }
+    .pg-pager-size {
+        max-width: 56px;
+        margin-left: 3px;
+    }
+}
+
+/* 隐藏原生分页栏 */
+.pg-hide-native-pager {
+    display: none !important;
 }
 
 /* ====== 分组容器 ====== */
 .pg-group-wrapper {
-    margin: 8px 0;
-    background: var(--black30a);
+    width: 100%;
+    margin-bottom: 8px;
     border: 1px solid var(--SmartThemeBorderColor);
     border-radius: 6px;
-    overflow: hidden;
-    width: 100%;
+    background: var(--black10a);
+    flex: 0 0 100%;
     grid-column: 1 / -1;
 }
-
 .pg-group-wrapper.pg-empty {
-    opacity: 0.7;
+    border-style: dashed;
+    opacity: 0.85;
 }
-
 .pg-group-header {
     display: flex;
     align-items: center;
     gap: 8px;
     padding: 8px 10px;
-    background: var(--black50a);
     cursor: pointer;
     user-select: none;
-    transition: background 0.15s;
+    background: var(--black20a);
+    border-radius: 6px 6px 0 0;
 }
-
-.pg-group-header:hover {
-    background: var(--white20a);
+.pg-group-wrapper.pg-collapsed .pg-group-header,
+.pg-group-wrapper.pg-empty.pg-collapsed .pg-group-header {
+    border-radius: 6px;
 }
-
-.pg-group-header .pg-toggle {
-    transition: transform 0.2s;
-    flex-shrink: 0;
-}
-
+.pg-group-header:hover { background: var(--white20a); }
 .pg-group-wrapper.pg-collapsed .pg-toggle {
     transform: rotate(-90deg);
 }
-
-.pg-group-header .pg-group-name {
-    flex: 1;
-    font-weight: bold;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+.pg-group-wrapper.pg-collapsed .pg-group-body {
+    display: none !important;
 }
-
-.pg-group-header .pg-group-count {
-    flex-shrink: 0;
-    padding: 2px 8px;
-    background: var(--SmartThemeQuoteColor);
-    color: var(--SmartThemeBodyColor);
-    border-radius: 10px;
-    font-size: 0.8em;
-    opacity: 0.9;
+.pg-group-name { flex: 1; font-weight: bold; }
+.pg-group-count {
+    opacity: 0.6;
+    font-size: 0.85em;
+    padding: 0 4px;
 }
-
-.pg-group-header .pg-group-actions {
-    display: flex;
-    gap: 8px;
-    flex-shrink: 0;
-}
-
-.pg-group-header .pg-group-actions i {
-    cursor: pointer;
-    padding: 4px;
-    opacity: 0.7;
-    transition: opacity 0.15s, color 0.15s;
-}
-
-.pg-group-header .pg-group-actions i:hover {
-    opacity: 1;
+.pg-group-wrapper.pg-empty .pg-group-count {
     color: var(--SmartThemeQuoteColor);
+    opacity: 0.85;
 }
+.pg-group-actions {
+    display: flex;
+    gap: 12px;
+    opacity: 0.6;
+}
+.pg-group-actions:hover { opacity: 1; }
+.pg-group-actions i {
+    cursor: pointer;
+    padding: 6px;
+    font-size: 0.95em;
+}
+.pg-group-actions i:hover { color: var(--SmartThemeQuoteColor); }
 
+/* 分组 body */
 .pg-group-body {
     display: flex;
     flex-direction: column;
     gap: 5px;
     padding: 8px;
+    border-top: 1px solid var(--SmartThemeBorderColor);
 }
-
 #user_avatar_block.gridView .pg-group-body {
     flex-direction: row;
     flex-wrap: wrap;
     gap: 5px;
 }
 
-.pg-group-wrapper.pg-collapsed .pg-group-body {
-    display: none;
-}
-
+/* 空分组提示 */
 .pg-empty-hint {
-    padding: 16px;
     text-align: center;
-    opacity: 0.6;
+    padding: 16px 8px;
+    opacity: 0.55;
+    font-size: 0.85em;
     font-style: italic;
-    font-size: 0.9em;
-    width: 100%;
 }
 
 /* ====== 多选模式 ====== */
 .avatar-container.pg-select-mode {
     position: relative;
-    cursor: pointer;
 }
-
-.avatar-container.pg-select-mode::before {
-    content: '';
+.avatar-container .pg-check {
     position: absolute;
-    inset: 0;
-    border: 2px dashed var(--SmartThemeQuoteColor);
-    border-radius: 4px;
-    pointer-events: none;
-    opacity: 0.4;
+    top: 4px;
+    left: 4px;
     z-index: 5;
-}
-
-.avatar-container.pg-checked::before {
-    background: var(--SmartThemeQuoteColor);
-    opacity: 0.2;
-    border-style: solid;
-}
-
-.pg-check {
-    position: absolute;
-    top: 6px;
-    right: 6px;
-    z-index: 10;
-    width: 20px;
-    height: 20px;
+    width: 22px;
+    height: 22px;
     cursor: pointer;
+    accent-color: var(--SmartThemeQuoteColor);
+}
+.avatar-container.pg-checked {
+    outline: 2px solid var(--SmartThemeQuoteColor);
+    outline-offset: -2px;
+    border-radius: 4px;
 }
 
-/* ====== 扩展设置面板 ====== */
-.pg-extension-settings .pg-setting-row {
-    padding: 6px 0;
-}
-
-.pg-extension-settings .pg-setting-row + .pg-setting-row {
-    border-top: 1px dashed var(--SmartThemeBorderColor);
-    margin-top: 6px;
-}
-
-.pg-extension-settings .pg-setting-hint {
-    display: block;
-    font-size: 0.85em;
-}
-
-/* ====== 快捷弹窗按钮 ====== */
+/* ====== 快捷按钮（位置2）====== */
 #pg-quick-btn {
+    position: relative;
+    width: var(--bottomFormBlockSize);
+    height: var(--bottomFormBlockSize);
+    order: 10;
+    cursor: pointer;
+    flex-shrink: 0;
+    align-self: center;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
-    margin: 0 3px;
-    cursor: pointer;
-    border-radius: 50%;
-    overflow: hidden;
-    flex-shrink: 0;
-    transition: transform 0.15s, box-shadow 0.15s;
 }
-
-#pg-quick-btn:hover {
-    transform: scale(1.08);
-    box-shadow: 0 0 8px var(--SmartThemeQuoteColor);
-}
-
 #pg-quick-btn .pg-quick-btn-img {
     width: 100%;
     height: 100%;
-    object-fit: cover;
     border-radius: 50%;
+    border: 1px solid transparent;
+    box-shadow: 0 0 5px var(--black50a);
+    outline: 2px solid transparent;
+    object-fit: cover;
+    object-position: center center;
+    transition: outline-color 0.15s, transform 0.15s;
+    display: block;
 }
-
+#pg-quick-btn:hover .pg-quick-btn-img {
+    outline-color: var(--SmartThemeQuoteColor);
+    transform: scale(1.05);
+}
+body.square-avatars #pg-quick-btn .pg-quick-btn-img {
+    border-radius: 2px;
+}
 #pg-quick-btn .pg-fallback-icon {
-    font-size: 24px;
+    font-size: calc(var(--bottomFormBlockSize) * 0.6);
     color: var(--SmartThemeBodyColor);
 }
+#pg-quick-btn:hover .pg-fallback-icon {
+    color: var(--SmartThemeQuoteColor);
+}
 
-/* ====== 快捷弹窗主体 ====== */
+/* ====== 快捷弹窗（PC 默认尺寸）====== */
 .pg-quick-popup {
     position: fixed;
-    z-index: 10000;
     width: 320px;
-    max-width: 90vw;
-    max-height: 70vh;
+    max-width: calc(100vw - 16px);
+    max-height: 60vh;
     overflow-y: auto;
-    padding: 10px;
-    background: var(--SmartThemeBlurTintColor, var(--black70a));
-    color: var(--SmartThemeBodyColor);
+    background: var(--SmartThemeBlurTintColor);
     border: 1px solid var(--SmartThemeBorderColor);
     border-radius: 8px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(10px);
+    padding: 10px;
+    z-index: 30000;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    backdrop-filter: blur(var(--SmartThemeBlurStrength));
+    box-sizing: border-box;
 }
-
 .pg-quick-header {
-    font-size: 0.95em;
     font-weight: bold;
-    padding: 4px 6px 8px;
-    border-bottom: 1px solid var(--SmartThemeBorderColor);
     margin-bottom: 8px;
+    border-bottom: 1px solid var(--SmartThemeBorderColor);
+    padding-bottom: 6px;
 }
-
-.pg-quick-group {
-    margin-bottom: 10px;
-}
-
+.pg-quick-group, .pg-quick-ungrouped { margin-bottom: 8px; }
 .pg-quick-group-header {
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 4px 6px;
-    background: var(--black30a);
-    border-radius: 4px;
     cursor: pointer;
+    padding: 6px;
     user-select: none;
     font-size: 0.9em;
-    transition: background 0.15s;
 }
-
 .pg-quick-group-header:hover {
     background: var(--white20a);
+    border-radius: 4px;
 }
-
-.pg-quick-group-header i {
-    transition: transform 0.2s;
-    flex-shrink: 0;
-}
-
-.pg-quick-group.pg-collapsed .pg-quick-group-header i {
-    transform: rotate(-90deg);
-}
-
-.pg-quick-group-header span:nth-child(2) {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
+.pg-quick-group.pg-collapsed .pg-quick-grid { display: none; }
+.pg-quick-group.pg-collapsed .fa-chevron-down { transform: rotate(-90deg); }
 .pg-quick-count {
-    flex-shrink: 0;
-    padding: 1px 6px;
-    background: var(--SmartThemeQuoteColor);
-    border-radius: 8px;
-    font-size: 0.8em;
-    opacity: 0.9;
+    margin-left: auto;
+    opacity: 0.6;
+    font-size: 0.85em;
 }
 
+/* 弹窗里的头像网格：5列 */
 .pg-quick-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(48px, 1fr));
+    grid-template-columns: repeat(5, 1fr);
     gap: 6px;
-    padding: 6px 4px;
+    padding: 4px;
 }
-
-.pg-quick-group.pg-collapsed .pg-quick-grid {
-    display: none;
-}
-
-.pg-quick-ungrouped {
-    margin-top: 8px;
-}
-
 .pg-quick-avatar {
-    position: relative;
+    cursor: pointer;
+    border-radius: 50%;
+    overflow: hidden;
     width: 100%;
     aspect-ratio: 1;
-    cursor: pointer;
-    border-radius: 6px;
-    overflow: hidden;
+    transition: transform 0.15s, box-shadow 0.15s;
     border: 2px solid transparent;
-    transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+    box-sizing: border-box;
 }
-
-.pg-quick-avatar:hover {
-    transform: scale(1.08);
-    border-color: var(--SmartThemeQuoteColor);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
-    z-index: 2;
-}
-
-.pg-quick-avatar.pg-current {
-    border-color: var(--SmartThemeQuoteColor);
-    box-shadow: 0 0 0 2px var(--SmartThemeQuoteColor);
-}
-
+body.square-avatars .pg-quick-avatar { border-radius: 2px; }
 .pg-quick-avatar img {
     width: 100%;
     height: 100%;
     object-fit: cover;
     display: block;
 }
+.pg-quick-avatar:hover {
+    transform: scale(1.1);
+    box-shadow: 0 0 8px var(--SmartThemeQuoteColor);
+}
+.pg-quick-avatar.pg-current { border-color: var(--SmartThemeQuoteColor); }
 
-/* ============================================================
- * 排序模式
- * ============================================================ */
-
-/* 排序按钮激活状态 */
-.pg-btn-sortmode.pg-active {
-    background: var(--SmartThemeQuoteColor) !important;
+/* ⭐ 移动端弹窗：高度占屏幕 1/3，宽度更窄，仍保持 5 列 */
+@media (max-width: 768px) {
+    .pg-quick-popup {
+        width: 270px;
+        max-height: 48vh;
+        padding: 8px;
+    }
+    .pg-quick-grid {
+        grid-template-columns: repeat(5, 1fr);
+        gap: 5px;
+        padding: 3px;
+    }
+    .pg-quick-header {
+        margin-bottom: 6px;
+        padding-bottom: 5px;
+        font-size: 0.95em;
+    }
 }
 
+/* 极窄屏依然保持 5 列（用户要求） */
+@media (max-width: 380px) {
+    .pg-quick-grid {
+        grid-template-columns: repeat(5, 1fr);
+    }
+}
+
+/* ====== 扩展设置面板 ====== */
+#pg-extension-settings .pg-setting-row {
+    margin: 8px 0;
+}
+#pg-extension-settings .checkbox_label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+}
+#pg-extension-settings .pg-setting-hint {
+    display: block;
+    margin-top: 4px;
+    font-size: 0.85em;
+    line-height: 1.4;
+}
+
+/* ====== 排序模式 ====== */
 /* 排序模式提示横幅 */
 .pg-sort-hint {
     display: flex;
@@ -444,65 +441,38 @@
     font-size: 0.85em;
     opacity: 0.95;
 }
-
 .pg-sort-hint .menu_button {
     margin: 0;
     padding: 3px 10px;
     min-width: 56px;
 }
 
-/* 拖拽手柄（默认隐藏，仅排序模式下显示） */
-.pg-drag-handle {
-    display: none;
-    align-items: center;
-    justify-content: center;
+/* 拖拽手柄：覆盖在整张人设卡上，完全透明，吸收所有点击/拖拽 */
+.pg-drag-handle-card {
+    position: absolute !important;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 50;
     cursor: grab;
-    color: var(--SmartThemeBodyColor);
-    opacity: 0.75;
-    user-select: none;
-    -webkit-user-select: none;
+    background: transparent;
+    /* 关键：禁掉浏览器触摸滚动手势，让 SortableJS 能拿到 */
     touch-action: none;
     -webkit-touch-callout: none;
-    transition: opacity 0.15s, color 0.15s, background 0.15s;
+    -webkit-user-select: none;
+    user-select: none;
 }
-
-.pg-drag-handle:hover {
-    opacity: 1;
-    color: var(--SmartThemeQuoteColor);
-}
-
-.pg-drag-handle:active {
+.pg-drag-handle-card:active {
     cursor: grabbing;
 }
 
-#user_avatar_block.pg-sort-mode .pg-drag-handle {
-    display: inline-flex;
-}
-
-/* 卡片上的手柄：左上角浮动 */
-.pg-drag-handle-card {
-    position: absolute;
-    top: 4px;
-    left: 4px;
-    z-index: 6;
-    width: 28px;
-    height: 28px;
-    border-radius: 4px;
-    background: var(--black50a);
-    backdrop-filter: blur(4px);
-    font-size: 14px;
-    border: 1px solid var(--SmartThemeBorderColor);
-}
-
-.pg-drag-handle-card:hover {
-    background: var(--SmartThemeQuoteColor);
-    color: var(--SmartThemeBodyColor);
-}
-
+/* 排序模式下：卡片必须能承载绝对定位的手柄，并加一个虚线提示框 */
 #user_avatar_block.pg-sort-mode .avatar-container {
     position: relative;
 }
-
 #user_avatar_block.pg-sort-mode .avatar-container::after {
     content: '';
     position: absolute;
@@ -510,27 +480,23 @@
     border: 1px dashed var(--SmartThemeQuoteColor);
     border-radius: 4px;
     pointer-events: none;
-    opacity: 0.4;
+    opacity: 0.5;
+    z-index: 49;
 }
 
-/* 分组 header 上的手柄 */
-.pg-drag-handle-group {
-    width: 28px;
-    height: 28px;
-    border-radius: 4px;
-    font-size: 15px;
-    flex-shrink: 0;
-}
-
-.pg-drag-handle-group:hover {
-    background: var(--white20a);
-}
-
+/* 排序模式下：分组 header 整体作为拖动把手 */
 #user_avatar_block.pg-sort-mode .pg-group-header {
-    cursor: default;
+    cursor: grab;
+}
+#user_avatar_block.pg-sort-mode .pg-group-header:active {
+    cursor: grabbing;
+}
+/* 但 header 上的重命名/删除按钮要保留正常光标 */
+#user_avatar_block.pg-sort-mode .pg-group-actions i {
+    cursor: pointer;
 }
 
-/* 未分组容器（排序模式时单独包裹） */
+/* 未分组容器（排序模式时使用，复用分组 body 的样式） */
 .pg-ungrouped-wrapper {
     display: flex;
     flex-direction: column;
@@ -539,7 +505,6 @@
     width: 100%;
     grid-column: 1 / -1;
 }
-
 #user_avatar_block.gridView .pg-ungrouped-wrapper {
     flex-direction: row;
     flex-wrap: wrap;
@@ -551,13 +516,11 @@
     opacity: 0.35;
     background: var(--SmartThemeQuoteColor) !important;
 }
-
 .sortable-chosen {
     outline: 2px solid var(--SmartThemeQuoteColor);
     outline-offset: -2px;
     border-radius: 4px;
 }
-
 .sortable-drag {
     opacity: 0.85;
 }
