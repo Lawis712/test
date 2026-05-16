@@ -137,7 +137,6 @@ function getName(a) {
 }
 function getAvatarUrl(a) { return '/thumbnail?type=persona&file=' + encodeURIComponent(a); }
 
-/* ⭐ 需求3/4：读取 persona 的 title 和 description */
 function getPersonaTitle(a) {
     const desc = (power_user.persona_descriptions || {})[a];
     if (!desc) return '';
@@ -183,9 +182,6 @@ function isStQuickPersonaEnabled() {
     return !!(qp && qp.enabled === true);
 }
 
-/**
- * 按持久化顺序排序未分组人设
- */
 function applyUngroupedOrder(ungroupedAvatars) {
     const order = getUngroupedOrder();
     if (!order.length) return ungroupedAvatars.slice();
@@ -204,7 +200,6 @@ function applyUngroupedOrder(ungroupedAvatars) {
     return ordered;
 }
 
-/* ⭐ 需求3：判断 persona 是否匹配搜索词（name + title + description） */
 function matchesSearch(avatar, query) {
     if (!query) return true;
     const q = query.toLowerCase();
@@ -214,7 +209,6 @@ function matchesSearch(avatar, query) {
     if (title.includes(q)) return true;
     const desc = getPersonaDescription(avatar).toLowerCase();
     if (desc.includes(q)) return true;
-    // 兜底：原始 avatar 文件名
     if (avatar.toLowerCase().includes(q)) return true;
     return false;
 }
@@ -387,7 +381,7 @@ function initMainPanel() {
             toolbar.parentElement.insertBefore(pager, toolbar.nextSibling);
         }
         hideNativePagination();
-        hijackNativeSearch();   // ⭐ 需求3：覆盖原生搜索
+        hijackNativeSearch();
         renderToolbar();
         reorganizeNative();
     };
@@ -403,7 +397,6 @@ function hideNativePagination() {
     });
 }
 
-/* ⭐ 需求3：拦截原生搜索框，扩展自己做匹配 */
 let _searchDebounceTimer = null;
 function hijackNativeSearch() {
     const searchInput = document.getElementById('persona_search_bar');
@@ -411,7 +404,6 @@ function hijackNativeSearch() {
     if (searchInput.dataset.pgHijacked === '1') return;
     searchInput.dataset.pgHijacked = '1';
 
-    // 在捕获阶段拦截，阻止原生 handler 接收事件
     const handler = (e) => {
         e.stopImmediatePropagation();
         const val = searchInput.value || '';
@@ -425,7 +417,6 @@ function hijackNativeSearch() {
     searchInput.addEventListener('input', handler, true);
     searchInput.addEventListener('change', handler, true);
 
-    // 初始化一次
     state.search = searchInput.value || '';
 }
 
@@ -596,8 +587,6 @@ async function reorganizeNative() {
 
     disableSortable();
 
-    /* ⭐ 需求3：搜索时使用扩展自己的匹配逻辑（不再让原生 hide 卡片）。
-       搜索状态下展平、不分组、不分页，结果走原有 reorganizeNative 主体逻辑。 */
     if (state.search.trim()) {
         isReorganizing = true;
         try {
@@ -622,7 +611,6 @@ async function reorganizeNative() {
 
             await ensureAllCardsInDom();
 
-            // 扩展自己做搜索匹配（name + title + description）
             const q = state.search.trim();
             block.querySelectorAll(':scope > .avatar-container').forEach(c => {
                 const id = getCardAvatarId(c);
@@ -803,7 +791,7 @@ async function reorganizeNative() {
         }
 
         applySelectModeUI();
-        applySortModeUI();          // ⭐ 排序模式：渲染头像上的透明手柄
+        applySortModeUI();
         bindWrappers(block);
         renderPager(totalPages);
 
@@ -964,24 +952,19 @@ function interceptInSelectMode(e) {
     updateSelectionCount();
 }
 
-/* ⭐ 排序模式：在每张头像上覆盖一个透明拖拽手柄，分组 header 整体作为分组手柄 */
 function applySortModeUI() {
     const block = document.getElementById('user_avatar_block');
     if (!block) return;
-    // 清除旧手柄
     block.querySelectorAll('.pg-drag-handle').forEach(h => h.remove());
     block.classList.toggle('pg-sort-mode', !!state.sortMode);
     if (!state.sortMode) return;
 
-    // 给每张人设卡覆盖一个透明手柄（覆盖整张卡，让"拖头像就能拖"）
     block.querySelectorAll('.avatar-container').forEach(c => {
-        // 卡片必须可定位手柄
         if (getComputedStyle(c).position === 'static') {
             c.style.position = 'relative';
         }
         const handle = document.createElement('div');
         handle.className = 'pg-drag-handle pg-drag-handle-card';
-        // 阻止点击穿透到原生切换逻辑（虽然我们 click 里也判断了 sortMode，但双保险）
         handle.addEventListener('click', e => { e.stopPropagation(); e.preventDefault(); });
         c.appendChild(handle);
     });
@@ -1022,15 +1005,59 @@ function bindWrappers(block) {
 }
 
 // ========== 拖拽排序 (SortableJS) ==========
+// ⭐ 多路径加载，最后回退到 CDN
 async function loadSortable() {
     if (window.Sortable) return window.Sortable;
+
+    // 方式1：尝试从 ST 的 lib.js（不同版本可能有/没有）
     try {
         const m = await import('/lib.js');
         if (m.Sortable) {
             window.Sortable = m.Sortable;
+            console.log('[' + EXT_NAME + '] SortableJS loaded from /lib.js');
             return m.Sortable;
         }
-    } catch (e) { /* ignore */ }
+        if (m.default && m.default.Sortable) {
+            window.Sortable = m.default.Sortable;
+            console.log('[' + EXT_NAME + '] SortableJS loaded from /lib.js (default)');
+            return m.default.Sortable;
+        }
+    } catch (e) { /* 静默 */ }
+
+    // 方式2：从 CDN 加载（jsdelivr）
+    try {
+        await new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = 'https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js';
+            s.onload = resolve;
+            s.onerror = reject;
+            document.head.appendChild(s);
+        });
+        if (window.Sortable) {
+            console.log('[' + EXT_NAME + '] SortableJS loaded from jsdelivr CDN');
+            return window.Sortable;
+        }
+    } catch (e) {
+        console.warn('[' + EXT_NAME + '] jsdelivr CDN failed, trying unpkg...');
+    }
+
+    // 方式3：备用 CDN（unpkg）
+    try {
+        await new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = 'https://unpkg.com/sortablejs@1.15.2/Sortable.min.js';
+            s.onload = resolve;
+            s.onerror = reject;
+            document.head.appendChild(s);
+        });
+        if (window.Sortable) {
+            console.log('[' + EXT_NAME + '] SortableJS loaded from unpkg CDN');
+            return window.Sortable;
+        }
+    } catch (e) {
+        console.error('[' + EXT_NAME + '] All Sortable loading methods failed:', e);
+    }
+
     return null;
 }
 
@@ -1038,7 +1065,20 @@ function enableSortable(block) {
     disableSortable();
     loadSortable().then(Sortable => {
         if (!Sortable) {
-            console.warn('[' + EXT_NAME + '] SortableJS 不可用，排序模式无法启用拖拽。');
+            console.warn('[' + EXT_NAME + '] SortableJS 不可用，排序模式无法启用拖拽。请检查网络是否可访问 jsdelivr.net 或 unpkg.com。');
+            // 在工具栏提示横幅里显示错误
+            const hint = document.querySelector('.pg-sort-hint');
+            if (hint) {
+                hint.innerHTML = '⚠️ 拖拽库加载失败，请检查网络（需访问 cdn.jsdelivr.net 或 unpkg.com）。' +
+                    '<button class="menu_button pg-btn-exit-sort" style="margin-left:8px;">退出</button>';
+                hint.style.borderColor = '#c66';
+                const exitBtn = hint.querySelector('.pg-btn-exit-sort');
+                if (exitBtn) exitBtn.addEventListener('click', () => {
+                    state.sortMode = false;
+                    disableSortable();
+                    refreshMain();
+                });
+            }
             return;
         }
         if (!state.sortMode) return;
@@ -1051,7 +1091,7 @@ function enableSortable(block) {
             forceFallback: false,
         };
 
-        // 1) 分组排序：拖分组 header 移动整个分组
+        // 1) 分组排序
         const groupSortable = Sortable.create(block, {
             ...commonOpts,
             group: { name: 'pg-groups', pull: false, put: false },
@@ -1074,7 +1114,7 @@ function enableSortable(block) {
         });
         _sortableInstances.push(groupSortable);
 
-        // 2) 组内 / 未分组 / 跨组 卡片排序：通过覆盖在头像上的透明手柄
+        // 2) 卡片排序
         const bodies = block.querySelectorAll('.pg-group-body, .pg-ungrouped-wrapper');
         bodies.forEach(body => {
             const inst = Sortable.create(body, {
@@ -1084,13 +1124,14 @@ function enableSortable(block) {
                 handle: '.pg-drag-handle-card',
                 onEnd: () => {
                     persistPersonaOrders(block);
-                    // 拖动后 DOM 顺序变了，需要重新挂手柄到正确位置（其实手柄是跟着卡片走的，但样式可能需要刷一下）
                     applySortModeUI();
-                    enableSortable(block); // 重新绑定 Sortable 以包含新位置的容器（跨组移动后必要）
+                    enableSortable(block);
                 },
             });
             _sortableInstances.push(inst);
         });
+
+        console.log('[' + EXT_NAME + '] Sortable enabled, instances=' + _sortableInstances.length);
     }).catch(err => {
         console.error('[' + EXT_NAME + '] Failed to load Sortable:', err);
     });
@@ -1346,7 +1387,6 @@ function renderQuick() {
     });
 }
 
-/* ⭐ 需求4：渲染快捷弹窗头像时，title 改为 "名字\n备注" */
 function renderQuickAv(a) {
     const name = getName(a);
     const titleNote = getPersonaTitle(a);
