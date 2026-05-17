@@ -440,7 +440,7 @@ body.square-avatars .pg-quick-avatar { border-radius: 2px; }
     min-width: 56px;
 }
 
-/* ⭐ 拖拽手柄：只覆盖头像区域（不是整张卡片） */
+/* 拖拽手柄：只覆盖头像区域 */
 .pg-drag-handle-avatar {
     position: absolute !important;
     top: 0;
@@ -462,12 +462,30 @@ body.square-avatars .pg-quick-avatar { border-radius: 2px; }
     cursor: grabbing;
 }
 
-/* 排序模式下：给头像加一个虚线高亮提示"这里可拖" */
+/* ⭐ PC 端：头像虚线高亮（视觉提示） */
 #user_avatar_block.pg-sort-mode .avatar-container .avatar,
 #user_avatar_block.pg-sort-mode .avatar-container > img {
     outline: 2px dashed var(--SmartThemeQuoteColor);
     outline-offset: 2px;
     border-radius: 4px;
+}
+
+/* ⭐ 移动端：去掉虚线，改用更轻量的 box-shadow（GPU 友好） */
+@media (max-width: 768px) {
+    #user_avatar_block.pg-sort-mode .avatar-container .avatar,
+    #user_avatar_block.pg-sort-mode .avatar-container > img {
+        outline: none;
+        box-shadow: 0 0 0 2px var(--SmartThemeQuoteColor);
+        border-radius: 4px;
+    }
+}
+
+/* ⭐ 移动端拖拽性能：提示浏览器使用 GPU 合成层 */
+@media (max-width: 768px) {
+    #user_avatar_block.pg-sort-mode .avatar-container {
+        will-change: transform;
+        transform: translateZ(0);
+    }
 }
 
 /* 排序模式下：分组 header 整体作为拖动把手 */
@@ -508,4 +526,17 @@ body.square-avatars .pg-quick-avatar { border-radius: 2px; }
 }
 .sortable-drag {
     opacity: 0.85;
+}
+
+/* ⭐ 移动端拖拽视觉反馈轻量化 */
+@media (max-width: 768px) {
+    .sortable-ghost {
+        opacity: 0.4;
+        background: transparent !important;
+        box-shadow: inset 0 0 0 2px var(--SmartThemeQuoteColor);
+    }
+    .sortable-drag {
+        opacity: 0.9;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
 }
