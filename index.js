@@ -34,6 +34,15 @@ const BTN_ID = 'pg-quick-btn';
 const POPUP_ID = 'pg-quick-popup';
 const SETTINGS_ID = 'pg-extension-settings';
 
+// ⭐ 移动端检测
+const IS_MOBILE = (() => {
+    if (typeof window === 'undefined') return false;
+    if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+        if (window.innerWidth <= 1024) return true;
+    }
+    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent || '');
+})();
+
 // ========== 存储 ==========
 function initStorage() {
     if (!extension_settings[KEY]) {
@@ -747,7 +756,7 @@ async function reorganizeNative() {
 
                     const body = document.createElement('div');
                     body.className = 'pg-group-body';
-                    body.dataset.gid = g.id;     // ⭐ 在 body 上也记录 gid，方便持久化
+                    body.dataset.gid = g.id;
                     if (!g.collapsed && totalPersonasInGroup > 0) {
                         for (const a of g.personas) {
                             if (cardMap.has(a) && passFilter(a)) {
@@ -952,7 +961,6 @@ function interceptInSelectMode(e) {
     updateSelectionCount();
 }
 
-/* ⭐ 排序模式：手柄只覆盖在头像 img 上，不覆盖文字部分 */
 function applySortModeUI() {
     const block = document.getElementById('user_avatar_block');
     if (!block) return;
@@ -961,11 +969,9 @@ function applySortModeUI() {
     if (!state.sortMode) return;
 
     block.querySelectorAll('.avatar-container').forEach(c => {
-        // 找到头像元素：优先 .avatar，否则用第一个 img
         const avatarEl = c.querySelector('.avatar') || c.querySelector('img');
         if (!avatarEl) return;
 
-        // 确保头像元素能定位手柄
         if (getComputedStyle(avatarEl).position === 'static') {
             avatarEl.style.position = 'relative';
         }
@@ -1027,9 +1033,7 @@ async function loadSortable() {
             document.head.appendChild(s);
         });
         if (window.Sortable) return window.Sortable;
-    } catch (e) {
-        console.warn('[' + EXT_NAME + '] jsdelivr CDN failed, trying unpkg...');
-    }
+    } catch (e) { /* 静默 */ }
     try {
         await new Promise((resolve, reject) => {
             const s = document.createElement('script');
@@ -1049,7 +1053,6 @@ function enableSortable(block) {
     disableSortable();
     loadSortable().then(Sortable => {
         if (!Sortable) {
-            console.warn('[' + EXT_NAME + '] SortableJS 不可用。');
             const hint = document.querySelector('.pg-sort-hint');
             if (hint) {
                 hint.innerHTML = '⚠️ 拖拽库加载失败，请检查网络（需访问 cdn.jsdelivr.net 或 unpkg.com）。' +
@@ -1066,12 +1069,22 @@ function enableSortable(block) {
         }
         if (!state.sortMode) return;
 
+        // ⭐ 移动端性能优化配置
         const commonOpts = {
-            animation: 150,
-            delay: 0,
+            // 移动端禁用位置动画，PC 端保留 100ms 动画
+            animation: IS_MOBILE ? 0 : 100,
+            // 移动端用 SortableJS 的 fallback 模式（自实现的拖拽），不用原生 HTML5 拖拽 API
+            forceFallback: IS_MOBILE,
+            // 移动端 fallback 时拖拽到屏幕边缘自动滚动
+            scroll: true,
+            scrollSensitivity: IS_MOBILE ? 80 : 30,
+            scrollSpeed: IS_MOBILE ? 20 : 10,
+            // 触摸时小幅度延迟避免误触
+            delay: IS_MOBILE ? 100 : 0,
             delayOnTouchOnly: true,
-            touchStartThreshold: 5,
-            forceFallback: false,
+            touchStartThreshold: IS_MOBILE ? 10 : 5,
+            // 减少不必要的 emit 事件
+            emptyInsertThreshold: 5,
         };
 
         // 1) 分组排序
@@ -1097,7 +1110,7 @@ function enableSortable(block) {
         });
         _sortableInstances.push(groupSortable);
 
-        // 2) 卡片排序（用头像上的透明手柄）
+        // 2) 卡片排序
         const bodies = block.querySelectorAll('.pg-group-body, .pg-ungrouped-wrapper');
         bodies.forEach(body => {
             const inst = Sortable.create(body, {
@@ -1106,23 +1119,41 @@ function enableSortable(block) {
                 draggable: '.avatar-container',
                 handle: '.pg-drag-handle-avatar',
                 onEnd: () => {
-                    // ⭐ 关键修复：先持久化，再延迟重建 UI
                     persistPersonaOrders(block);
-                    // 用 setTimeout 让 SortableJS 内部状态先稳定下来
+                    // ⭐ 优化：拖完后不再销毁重建 Sortable 实例，仅刷新手柄
+                    // Sortable 自己能识别新的 DOM 顺序，不需要重新 create
+                    // 但跨组拖动后，新容器内的卡片需要手柄 → 用 setTimeout 等 DOM 稳定再加
                     setTimeout(() => {
-                        if (state.sortMode) {
-                            applySortModeUI();
-                            enableSortable(block);
-                        }
-                    }, 50);
+                        if (!state.sortMode) return;
+                        // 只补充缺失的手柄，不全量重建
+                        ensureDragHandles(block);
+                    }, 30);
                 },
             });
             _sortableInstances.push(inst);
         });
 
-        console.log('[' + EXT_NAME + '] Sortable enabled, instances=' + _sortableInstances.length);
+        console.log('[' + EXT_NAME + '] Sortable enabled (mobile=' + IS_MOBILE + ', instances=' + _sortableInstances.length + ')');
     }).catch(err => {
         console.error('[' + EXT_NAME + '] Failed to load Sortable:', err);
+    });
+}
+
+/* ⭐ 优化：只补充缺失的手柄，不全量重建 */
+function ensureDragHandles(block) {
+    if (!state.sortMode) return;
+    block.querySelectorAll('.avatar-container').forEach(c => {
+        const avatarEl = c.querySelector('.avatar') || c.querySelector('img');
+        if (!avatarEl) return;
+        // 已经有手柄就跳过
+        if (avatarEl.querySelector('.pg-drag-handle-avatar')) return;
+        if (getComputedStyle(avatarEl).position === 'static') {
+            avatarEl.style.position = 'relative';
+        }
+        const handle = document.createElement('div');
+        handle.className = 'pg-drag-handle pg-drag-handle-avatar';
+        handle.addEventListener('click', e => { e.stopPropagation(); e.preventDefault(); });
+        avatarEl.appendChild(handle);
     });
 }
 
@@ -1135,21 +1166,17 @@ function disableSortable() {
     if (block) block.classList.remove('pg-sort-mode');
 }
 
-/* ⭐ 修复：用更鲁棒的选择器收集卡片，并加防御性保护 */
 function persistPersonaOrders(block) {
     const groups = getGroups();
     const groupMap = new Map(groups.map(g => [g.id, g]));
 
-    // 1) 收集所有分组 body 内的卡片
-    // 用 body.dataset.gid（在创建 body 时记录的）来匹配分组
     const allGroupBodies = block.querySelectorAll('.pg-group-body[data-gid]');
-    const newGroupPersonas = new Map();   // gid -> [avatarIds]
+    const newGroupPersonas = new Map();
 
     allGroupBodies.forEach(body => {
         const gid = body.dataset.gid;
         if (!gid) return;
         const ids = [];
-        // 用 children 而不是 querySelectorAll，避免 ungrouped wrapper 那种嵌套
         Array.from(body.children).forEach(child => {
             if (child.classList && child.classList.contains('avatar-container')) {
                 const id = getCardAvatarId(child);
@@ -1159,7 +1186,6 @@ function persistPersonaOrders(block) {
         newGroupPersonas.set(gid, ids);
     });
 
-    // 2) 收集未分组容器的顺序
     const ung = block.querySelector(':scope > .pg-ungrouped-wrapper');
     let newUngroupedOrder = null;
     if (ung) {
@@ -1173,15 +1199,12 @@ function persistPersonaOrders(block) {
         newUngroupedOrder = ids;
     }
 
-    // 3) 防御性检查：只更新有数据的分组
-    // 如果某个 group 在 DOM 里没找到（比如折叠的、被过滤掉的），保留它原本的数据
     let changed = false;
     for (const g of groups) {
         if (newGroupPersonas.has(g.id)) {
             const newList = newGroupPersonas.get(g.id);
-            // 双重保护：如果新列表是空的，但旧列表不是空的，说明 DOM 还没稳定 → 跳过
             if (newList.length === 0 && g.personas.length > 0) {
-                console.warn('[' + EXT_NAME + '] 检测到分组 "' + g.name + '" DOM 收集为空但原本非空，跳过该分组的持久化（防止数据丢失）');
+                console.warn('[' + EXT_NAME + '] 检测到分组 "' + g.name + '" DOM 收集为空但原本非空，跳过该分组的持久化');
                 continue;
             }
             if (JSON.stringify(g.personas) !== JSON.stringify(newList)) {
@@ -1419,7 +1442,7 @@ function renderQuickAv(a) {
 
 // ========== 入口 ==========
 jQuery(async () => {
-    console.log('[' + EXT_NAME + '] Loading...');
+    console.log('[' + EXT_NAME + '] Loading... (mobile=' + IS_MOBILE + ')');
     initStorage();
     await loadPersonaApi();
     loadPopper();
