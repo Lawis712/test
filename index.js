@@ -1,3 +1,5 @@
+废案 拖动排序 差删除分组后人设到末尾
+
 /**
  * SillyTavern Persona Groups (用户人设分组)
  * Copyright (C) 2026  Lavi
