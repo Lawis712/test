@@ -1,5 +1,3 @@
-废案 拖动排序 差删除分组后人设到末尾
-
 /**
  * SillyTavern Persona Groups (用户人设分组)
  * Copyright (C) 2026  Lavi
@@ -35,15 +33,7 @@ const PAGER_ID = 'pg-pager';
 const BTN_ID = 'pg-quick-btn';
 const POPUP_ID = 'pg-quick-popup';
 const SETTINGS_ID = 'pg-extension-settings';
-
-// ⭐ 移动端检测
-const IS_MOBILE = (() => {
-    if (typeof window === 'undefined') return false;
-    if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
-        if (window.innerWidth <= 1024) return true;
-    }
-    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent || '');
-})();
+const PIN_BTN_ID = 'pg-pin-current-btn';
 
 // ========== 存储 ==========
 function initStorage() {
@@ -51,20 +41,23 @@ function initStorage() {
         extension_settings[KEY] = {
             groups: [],
             pageSize: 20,
-            version: 2,
+            version: 3,
             groupsHidden: false,
             quickEnabled: true,
-            sortEnabled: false,
-            ungroupedOrder: [],
+            pinned: [],
         };
         saveSettingsDebounced();
     }
-    if (!extension_settings[KEY].groups) extension_settings[KEY].groups = [];
-    if (!extension_settings[KEY].pageSize) extension_settings[KEY].pageSize = 20;
-    if (typeof extension_settings[KEY].groupsHidden !== 'boolean') extension_settings[KEY].groupsHidden = false;
-    if (typeof extension_settings[KEY].quickEnabled !== 'boolean') extension_settings[KEY].quickEnabled = true;
-    if (typeof extension_settings[KEY].sortEnabled !== 'boolean') extension_settings[KEY].sortEnabled = false;
-    if (!Array.isArray(extension_settings[KEY].ungroupedOrder)) extension_settings[KEY].ungroupedOrder = [];
+    const s = extension_settings[KEY];
+    if (!s.groups) s.groups = [];
+    if (!s.pageSize) s.pageSize = 20;
+    if (typeof s.groupsHidden !== 'boolean') s.groupsHidden = false;
+    if (typeof s.quickEnabled !== 'boolean') s.quickEnabled = true;
+    if (!Array.isArray(s.pinned)) s.pinned = [];
+    // 数据迁移：清理老字段
+    if ('sortEnabled' in s) delete s.sortEnabled;
+    if ('ungroupedOrder' in s) delete s.ungroupedOrder;
+    s.version = 3;
     saveSettingsDebounced();
 }
 function getGroups() { return extension_settings[KEY].groups; }
@@ -74,10 +67,16 @@ function isGroupsHidden() { return !!extension_settings[KEY].groupsHidden; }
 function setGroupsHidden(v) { extension_settings[KEY].groupsHidden = !!v; saveSettingsDebounced(); }
 function isQuickEnabled() { return !!extension_settings[KEY].quickEnabled; }
 function setQuickEnabled(v) { extension_settings[KEY].quickEnabled = !!v; saveSettingsDebounced(); }
-function isSortEnabled() { return !!extension_settings[KEY].sortEnabled; }
-function setSortEnabled(v) { extension_settings[KEY].sortEnabled = !!v; saveSettingsDebounced(); }
-function getUngroupedOrder() { return extension_settings[KEY].ungroupedOrder || []; }
-function setUngroupedOrder(arr) { extension_settings[KEY].ungroupedOrder = Array.isArray(arr) ? arr : []; saveSettingsDebounced(); }
+function getPinned() { return extension_settings[KEY].pinned || []; }
+function isPinned(a) { return getPinned().includes(a); }
+function togglePin(avatar) {
+    if (!avatar) return;
+    const arr = getPinned();
+    const i = arr.indexOf(avatar);
+    if (i >= 0) arr.splice(i, 1);
+    else arr.push(avatar);
+    saveSettingsDebounced();
+}
 function saveGroups() { saveSettingsDebounced(); }
 function createGroup(name) {
     const id = 'g_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
@@ -193,22 +192,30 @@ function isStQuickPersonaEnabled() {
     return !!(qp && qp.enabled === true);
 }
 
-function applyUngroupedOrder(ungroupedAvatars) {
-    const order = getUngroupedOrder();
-    if (!order.length) return ungroupedAvatars.slice();
-    const set = new Set(ungroupedAvatars);
-    const ordered = [];
-    const seen = new Set();
-    for (const a of order) {
-        if (set.has(a) && !seen.has(a)) {
-            ordered.push(a);
-            seen.add(a);
+/**
+ * 给一组 avatar 排序：置顶的（按 pinned 数组顺序）排在前面，其余按传入顺序保持不变
+ * @param avatars 输入的 avatar 列表
+ * @param baseOrder （可选）非置顶的人设排序依据；不传则保持 avatars 原顺序
+ */
+function sortByPinned(avatars, baseOrder = null) {
+    const pinned = getPinned();
+    const inputSet = new Set(avatars);
+    // 已置顶且在 avatars 内的：按 pinned 数组顺序
+    const pinnedPart = pinned.filter(a => inputSet.has(a));
+    const pinnedSet = new Set(pinnedPart);
+    // 未置顶的：按 baseOrder 或 avatars 原顺序
+    let restPart;
+    if (baseOrder) {
+        const avSet = new Set(avatars);
+        restPart = baseOrder.filter(a => avSet.has(a) && !pinnedSet.has(a));
+        // 兜底：avatars 里有但 baseOrder 没有的（不应该发生，但保险）
+        for (const a of avatars) {
+            if (!pinnedSet.has(a) && !restPart.includes(a)) restPart.push(a);
         }
+    } else {
+        restPart = avatars.filter(a => !pinnedSet.has(a));
     }
-    for (const a of ungroupedAvatars) {
-        if (!seen.has(a)) ordered.push(a);
-    }
-    return ordered;
+    return [...pinnedPart, ...restPart];
 }
 
 function matchesSearch(avatar, query) {
@@ -266,10 +273,8 @@ async function switchPersona(avatar) {
     }
 }
 
-const state = { selectMode: false, sortMode: false, selected: new Set(), filter: 'all', page: 0, search: '' };
+const state = { selectMode: false, selected: new Set(), filter: 'all', page: 0, search: '' };
 let isReorganizing = false;
-
-const _sortableInstances = [];
 
 // ========== 扩展设置面板 ==========
 function initExtensionSettings() {
@@ -295,15 +300,6 @@ function initExtensionSettings() {
                         </label>
                         <small class="pg-setting-hint" id="pg-setting-quick-hint" style="display:none; opacity:0.7; margin-top:4px; font-style:italic;"></small>
                     </div>
-                    <div class="pg-setting-row">
-                        <label class="checkbox_label" for="pg-setting-sort-enabled">
-                            <input type="checkbox" id="pg-setting-sort-enabled">
-                            <span>启用排序按钮（在工具栏显示，可拖拽分组与人设）</span>
-                        </label>
-                        <small class="pg-setting-hint" style="opacity:0.7; margin-top:4px; font-style:italic;">
-                            开启后工具栏会多出一个"排序"按钮，点击进入排序模式；排序模式下按住头像即可拖动，可拖动分组、组内人设，以及跨组移动人设。
-                        </small>
-                    </div>
                 </div>
             </div>
         </div>
@@ -312,7 +308,6 @@ function initExtensionSettings() {
 
     const $cb = $panel.find('#pg-setting-quick-enabled');
     const $hint = $panel.find('#pg-setting-quick-hint');
-    const $cbSort = $panel.find('#pg-setting-sort-enabled');
 
     function updateUI() {
         const enabled = isQuickEnabled();
@@ -325,7 +320,6 @@ function initExtensionSettings() {
             $cb.prop('disabled', false);
             $hint.hide();
         }
-        $cbSort.prop('checked', isSortEnabled());
     }
 
     $cb.on('change', function () {
@@ -336,16 +330,6 @@ function initExtensionSettings() {
         } else {
             removeQuickBtn();
         }
-    });
-
-    $cbSort.on('change', function () {
-        const v = $(this).prop('checked');
-        setSortEnabled(v);
-        if (!v && state.sortMode) {
-            state.sortMode = false;
-            disableSortable();
-        }
-        refreshMain();
     });
 
     updateUI();
@@ -394,6 +378,7 @@ function initMainPanel() {
         hijackNativeSearch();
         renderToolbar();
         reorganizeNative();
+        injectPinCurrentButton();
     };
     tryInject();
 }
@@ -434,6 +419,7 @@ function refreshMain() {
     const t = document.getElementById(TOOLBAR_ID);
     if (t) renderToolbar();
     reorganizeNative();
+    updatePinCurrentButton();
 }
 
 function renderToolbar() {
@@ -466,9 +452,6 @@ function renderToolbar() {
     html += '<button class="menu_button pg-btn-newgroup" title="新建分组"><i class="fa-solid fa-folder-plus"></i></button>';
     html += '<button class="menu_button pg-btn-selectmode' + (state.selectMode?' pg-active':'') + '" title="多选模式"><i class="fa-solid fa-check-double"></i></button>';
     html += '<button class="menu_button pg-btn-toggle-groups' + (hidden?' pg-active':'') + '" title="' + (hidden?'显示分组':'隐藏分组') + '"><i class="fa-solid ' + (hidden?'fa-eye-slash':'fa-eye') + '"></i></button>';
-    if (isSortEnabled()) {
-        html += '<button class="menu_button pg-btn-sortmode' + (state.sortMode?' pg-active':'') + '" title="' + (state.sortMode?'退出排序模式':'排序模式（按住头像拖动）') + '"><i class="fa-solid fa-arrows-up-down-left-right"></i></button>';
-    }
     html += '</div>';
 
     if (state.selectMode) {
@@ -480,11 +463,6 @@ function renderToolbar() {
         html += '<button class="menu_button pg-btn-move">应用</button>';
         html += '<button class="menu_button pg-btn-clear-sel">清空</button>';
         html += '</div>';
-    }
-
-    if (state.sortMode) {
-        html += '<div class="pg-sort-hint">🔀 排序模式：按住<b>头像</b>拖动人设，按住<b>分组标题</b>拖动整个分组。' +
-            '<button class="menu_button pg-btn-exit-sort" style="margin-left:8px;">完成</button></div>';
     }
 
     t.innerHTML = html;
@@ -501,7 +479,6 @@ function bindToolbar(t) {
     });
     const sm = t.querySelector('.pg-btn-selectmode');
     if (sm) sm.addEventListener('click', () => {
-        if (state.sortMode) { state.sortMode = false; disableSortable(); }
         state.selectMode = !state.selectMode;
         state.selected.clear();
         refreshMain();
@@ -510,22 +487,6 @@ function bindToolbar(t) {
     if (tg) tg.addEventListener('click', () => {
         setGroupsHidden(!isGroupsHidden());
         state.page = 0;
-        refreshMain();
-    });
-
-    const sortBtn = t.querySelector('.pg-btn-sortmode');
-    if (sortBtn) sortBtn.addEventListener('click', () => {
-        if (state.selectMode) { state.selectMode = false; state.selected.clear(); }
-        state.sortMode = !state.sortMode;
-        if (!state.sortMode) disableSortable();
-        state.page = 0;
-        refreshMain();
-    });
-
-    const exitSort = t.querySelector('.pg-btn-exit-sort');
-    if (exitSort) exitSort.addEventListener('click', () => {
-        state.sortMode = false;
-        disableSortable();
         refreshMain();
     });
 
@@ -595,8 +556,6 @@ async function reorganizeNative() {
         await refreshValidAvatars();
     }
 
-    disableSortable();
-
     if (state.search.trim()) {
         isReorganizing = true;
         try {
@@ -612,12 +571,6 @@ async function reorganizeNative() {
                 w.remove();
             });
             block.querySelectorAll(':scope > .pg-empty-hint').forEach(el => el.remove());
-            block.querySelectorAll(':scope > .pg-ungrouped-wrapper').forEach(el => {
-                Array.from(el.children).forEach(child => {
-                    if (child.classList.contains('avatar-container')) block.appendChild(child);
-                });
-                el.remove();
-            });
 
             await ensureAllCardsInDom();
 
@@ -629,6 +582,7 @@ async function reorganizeNative() {
             });
 
             applySelectModeUI();
+            applyPinMarks(block);
             const pager = document.getElementById(PAGER_ID);
             if (pager) pager.style.display = 'none';
         } finally {
@@ -643,7 +597,7 @@ async function reorganizeNative() {
     }
 
     const pager = document.getElementById(PAGER_ID);
-    if (pager) pager.style.display = state.sortMode ? 'none' : '';
+    if (pager) pager.style.display = '';
 
     isReorganizing = true;
     try {
@@ -659,12 +613,6 @@ async function reorganizeNative() {
             w.remove();
         });
         block.querySelectorAll(':scope > .pg-empty-hint').forEach(el => el.remove());
-        block.querySelectorAll(':scope > .pg-ungrouped-wrapper').forEach(el => {
-            Array.from(el.children).forEach(child => {
-                if (child.classList.contains('avatar-container')) block.appendChild(child);
-            });
-            el.remove();
-        });
 
         await ensureAllCardsInDom();
 
@@ -690,46 +638,36 @@ async function reorganizeNative() {
         const groups = getGroups();
         const groupedSet = new Set();
         for (const g of groups) g.personas.forEach(a => groupedSet.add(a));
-        const allAvatars = getAllAvatars().filter(a => cardMap.has(a));
-        let ungroupedAvatars = allAvatars.filter(a => !groupedSet.has(a));
-        ungroupedAvatars = applyUngroupedOrder(ungroupedAvatars);
+        const allAvatarsOriginal = getAllAvatars().filter(a => cardMap.has(a));
+        const ungroupedAvatars = allAvatarsOriginal.filter(a => !groupedSet.has(a));
 
         let pageItemsForDisplay = [];
         let totalPages = 1;
 
         if (isFilteringByGroup) {
             const targetGroup = groups.find(g => g.id === filterGroupId);
-            const groupAvatars = targetGroup
+            let groupAvatars = targetGroup
                 ? targetGroup.personas.filter(a => cardMap.has(a))
                 : [];
-            if (state.sortMode) {
-                pageItemsForDisplay = groupAvatars;
-                totalPages = 1;
-            } else {
-                const pageSize = getPageSize();
-                totalPages = Math.max(1, Math.ceil(groupAvatars.length / pageSize));
-                if (state.page >= totalPages) state.page = totalPages - 1;
-                if (state.page < 0) state.page = 0;
-                const start = state.page * pageSize;
-                pageItemsForDisplay = groupAvatars.slice(start, start + pageSize);
-            }
+            // 分组内置顶在前
+            groupAvatars = sortByPinned(groupAvatars);
+            const pageSize = getPageSize();
+            totalPages = Math.max(1, Math.ceil(groupAvatars.length / pageSize));
+            if (state.page >= totalPages) state.page = totalPages - 1;
+            if (state.page < 0) state.page = 0;
+            const start = state.page * pageSize;
+            pageItemsForDisplay = groupAvatars.slice(start, start + pageSize);
         } else {
-            const ungroupedFiltered = ungroupedAvatars.filter(passFilter);
-            if (state.sortMode) {
-                pageItemsForDisplay = ungroupedFiltered;
-                totalPages = 1;
-                if (ungroupedFiltered.length > 200 && !window.__pg_sort_warned) {
-                    window.__pg_sort_warned = true;
-                    console.warn('[' + EXT_NAME + '] 未分组人设较多（' + ungroupedFiltered.length + '），排序模式可能略卡。');
-                }
-            } else {
-                const pageSize = getPageSize();
-                totalPages = Math.max(1, Math.ceil(ungroupedFiltered.length / pageSize));
-                if (state.page >= totalPages) state.page = totalPages - 1;
-                if (state.page < 0) state.page = 0;
-                const start = state.page * pageSize;
-                pageItemsForDisplay = ungroupedFiltered.slice(start, start + pageSize);
-            }
+            let ungroupedFiltered = ungroupedAvatars.filter(passFilter);
+            // 未分组：置顶在前，其余按原始顺序
+            ungroupedFiltered = sortByPinned(ungroupedFiltered, allAvatarsOriginal);
+
+            const pageSize = getPageSize();
+            totalPages = Math.max(1, Math.ceil(ungroupedFiltered.length / pageSize));
+            if (state.page >= totalPages) state.page = totalPages - 1;
+            if (state.page < 0) state.page = 0;
+            const start = state.page * pageSize;
+            pageItemsForDisplay = ungroupedFiltered.slice(start, start + pageSize);
 
             if (!hidden) {
                 const fragmentsToPrepend = [];
@@ -760,13 +698,14 @@ async function reorganizeNative() {
                     body.className = 'pg-group-body';
                     body.dataset.gid = g.id;
                     if (!g.collapsed && totalPersonasInGroup > 0) {
-                        for (const a of g.personas) {
-                            if (cardMap.has(a) && passFilter(a)) {
-                                const card = cardMap.get(a);
-                                if (card) {
-                                    card.style.display = '';
-                                    body.appendChild(card);
-                                }
+                        // 组内：置顶在前，其余按 group.personas 数组顺序
+                        const groupVisible = visibleInGroup;
+                        const sorted = sortByPinned(groupVisible);
+                        for (const a of sorted) {
+                            const card = cardMap.get(a);
+                            if (card) {
+                                card.style.display = '';
+                                body.appendChild(card);
                             }
                         }
                     } else if (!g.collapsed && totalPersonasInGroup === 0) {
@@ -781,34 +720,17 @@ async function reorganizeNative() {
             }
         }
 
-        if (state.sortMode && !isFilteringByGroup) {
-            const ungroupedWrapper = document.createElement('div');
-            ungroupedWrapper.className = 'pg-ungrouped-wrapper pg-group-body';
-            ungroupedWrapper.dataset.ungrouped = '1';
-            for (const a of pageItemsForDisplay) {
-                const card = cardMap.get(a);
-                if (!card) continue;
-                card.style.display = '';
-                ungroupedWrapper.appendChild(card);
-            }
-            block.appendChild(ungroupedWrapper);
-        } else {
-            for (const a of pageItemsForDisplay) {
-                const card = cardMap.get(a);
-                if (!card) continue;
-                card.style.display = '';
-                block.appendChild(card);
-            }
+        for (const a of pageItemsForDisplay) {
+            const card = cardMap.get(a);
+            if (!card) continue;
+            card.style.display = '';
+            block.appendChild(card);
         }
 
         applySelectModeUI();
-        applySortModeUI();
+        applyPinMarks(block);
         bindWrappers(block);
         renderPager(totalPages);
-
-        if (state.sortMode) {
-            enableSortable(block);
-        }
     } finally {
         requestAnimationFrame(() => {
             isReorganizing = false;
@@ -895,7 +817,6 @@ async function ensureAllCardsInDom() {
 
         clone.addEventListener('click', async (e) => {
             if (state.selectMode) return;
-            if (state.sortMode) return;
             const before = power_user.user_avatar;
             setTimeout(async () => {
                 if (power_user.user_avatar === before) {
@@ -963,24 +884,22 @@ function interceptInSelectMode(e) {
     updateSelectionCount();
 }
 
-function applySortModeUI() {
-    const block = document.getElementById('user_avatar_block');
+/* ⭐ 给已置顶的卡片右上角加金色星标 */
+function applyPinMarks(block) {
     if (!block) return;
-    block.querySelectorAll('.pg-drag-handle').forEach(h => h.remove());
-    block.classList.toggle('pg-sort-mode', !!state.sortMode);
-    if (!state.sortMode) return;
-
+    block.querySelectorAll('.pg-pin-mark').forEach(el => el.remove());
     block.querySelectorAll('.avatar-container').forEach(c => {
-        const avatarEl = c.querySelector('.avatar') || c.querySelector('img');
-        if (!avatarEl) return;
-
-        if (getComputedStyle(avatarEl).position === 'static') {
-            avatarEl.style.position = 'relative';
-        }
-        const handle = document.createElement('div');
-        handle.className = 'pg-drag-handle pg-drag-handle-avatar';
-        handle.addEventListener('click', e => { e.stopPropagation(); e.preventDefault(); });
-        avatarEl.appendChild(handle);
+        c.classList.remove('pg-pinned-card');
+    });
+    const pinnedSet = new Set(getPinned());
+    block.querySelectorAll('.avatar-container').forEach(c => {
+        const id = getCardAvatarId(c);
+        if (!id || !pinnedSet.has(id)) return;
+        c.classList.add('pg-pinned-card');
+        const mark = document.createElement('i');
+        mark.className = 'pg-pin-mark fa-solid fa-star';
+        mark.title = '已置顶';
+        c.appendChild(mark);
     });
 }
 
@@ -992,7 +911,6 @@ function bindWrappers(block) {
             header.dataset.pgBound = '1';
             header.addEventListener('click', e => {
                 if (e.target.closest('.pg-group-actions')) return;
-                if (state.sortMode) return;
                 toggleCollapse(gid);
                 refreshMain();
             });
@@ -1018,210 +936,83 @@ function bindWrappers(block) {
     });
 }
 
-// ========== 拖拽排序 (SortableJS) ==========
-async function loadSortable() {
-    if (window.Sortable) return window.Sortable;
-    try {
-        const m = await import('/lib.js');
-        if (m.Sortable) { window.Sortable = m.Sortable; return m.Sortable; }
-        if (m.default && m.default.Sortable) { window.Sortable = m.default.Sortable; return m.default.Sortable; }
-    } catch (e) { /* 静默 */ }
-    try {
-        await new Promise((resolve, reject) => {
-            const s = document.createElement('script');
-            s.src = 'https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js';
-            s.onload = resolve;
-            s.onerror = reject;
-            document.head.appendChild(s);
-        });
-        if (window.Sortable) return window.Sortable;
-    } catch (e) { /* 静默 */ }
-    try {
-        await new Promise((resolve, reject) => {
-            const s = document.createElement('script');
-            s.src = 'https://unpkg.com/sortablejs@1.15.2/Sortable.min.js';
-            s.onload = resolve;
-            s.onerror = reject;
-            document.head.appendChild(s);
-        });
-        if (window.Sortable) return window.Sortable;
-    } catch (e) {
-        console.error('[' + EXT_NAME + '] All Sortable loading methods failed:', e);
+// ========== 激活栏：当前人设置顶按钮 ==========
+/**
+ * 寻找当前激活 persona 的操作按钮行容器
+ * 酒馆原生的按钮行通常包含 Description / Lock / Connections 等
+ */
+function findPersonaActionsRow() {
+    // 优先用酒馆已知的容器
+    const candidates = [
+        '.persona-management-block .persona_actions',
+        '#persona-management-block .persona_actions',
+        '.persona-management .persona_actions',
+        '#PersonaManagement .persona_actions',
+        '.persona_actions',
+    ];
+    for (const sel of candidates) {
+        const el = document.querySelector(sel);
+        if (el) return el;
     }
+    // 兜底：找包含 Description 文字的相邻按钮容器
+    const descBtn = document.querySelector('#persona_description_button, [data-i18n*="description" i]');
+    if (descBtn && descBtn.parentElement) return descBtn.parentElement;
     return null;
 }
 
-function enableSortable(block) {
-    disableSortable();
-    loadSortable().then(Sortable => {
-        if (!Sortable) {
-            const hint = document.querySelector('.pg-sort-hint');
-            if (hint) {
-                hint.innerHTML = '⚠️ 拖拽库加载失败，请检查网络（需访问 cdn.jsdelivr.net 或 unpkg.com）。' +
-                    '<button class="menu_button pg-btn-exit-sort" style="margin-left:8px;">退出</button>';
-                hint.style.borderColor = '#c66';
-                const exitBtn = hint.querySelector('.pg-btn-exit-sort');
-                if (exitBtn) exitBtn.addEventListener('click', () => {
-                    state.sortMode = false;
-                    disableSortable();
-                    refreshMain();
-                });
+function injectPinCurrentButton() {
+    const tryInject = () => {
+        if (document.getElementById(PIN_BTN_ID)) {
+            updatePinCurrentButton();
+            return;
+        }
+        const row = findPersonaActionsRow();
+        if (!row) {
+            // 找不到容器，1 秒后重试，最多 10 次
+            if (!injectPinCurrentButton._retry) injectPinCurrentButton._retry = 0;
+            injectPinCurrentButton._retry++;
+            if (injectPinCurrentButton._retry <= 10) {
+                setTimeout(tryInject, 1000);
+            } else {
+                console.warn('[' + EXT_NAME + '] 未找到激活栏按钮容器，置顶按钮不显示（不影响其他功能）。');
             }
             return;
         }
-        if (!state.sortMode) return;
 
-        // ⭐ 移动端性能优化配置
-        const commonOpts = {
-            // 移动端禁用位置动画，PC 端保留 100ms 动画
-            animation: IS_MOBILE ? 0 : 100,
-            // 移动端用 SortableJS 的 fallback 模式（自实现的拖拽），不用原生 HTML5 拖拽 API
-            forceFallback: IS_MOBILE,
-            // 移动端 fallback 时拖拽到屏幕边缘自动滚动
-            scroll: true,
-            scrollSensitivity: IS_MOBILE ? 80 : 30,
-            scrollSpeed: IS_MOBILE ? 20 : 10,
-            // 触摸时小幅度延迟避免误触
-            delay: IS_MOBILE ? 100 : 0,
-            delayOnTouchOnly: true,
-            touchStartThreshold: IS_MOBILE ? 10 : 5,
-            // 减少不必要的 emit 事件
-            emptyInsertThreshold: 5,
-        };
-
-        // 1) 分组排序
-        const groupSortable = Sortable.create(block, {
-            ...commonOpts,
-            group: { name: 'pg-groups', pull: false, put: false },
-            draggable: '.pg-group-wrapper',
-            handle: '.pg-group-header',
-            filter: '.pg-group-actions, .pg-group-actions *, .pg-toggle',
-            preventOnFilter: false,
-            onEnd: () => {
-                const order = Array.from(block.querySelectorAll(':scope > .pg-group-wrapper'))
-                    .map(w => w.dataset.gid)
-                    .filter(Boolean);
-                const gs = getGroups();
-                const map = new Map(gs.map(g => [g.id, g]));
-                const newArr = [];
-                for (const id of order) if (map.has(id)) { newArr.push(map.get(id)); map.delete(id); }
-                for (const g of map.values()) newArr.push(g);
-                extension_settings[KEY].groups = newArr;
-                saveGroups();
-            },
+        const btn = document.createElement('div');
+        btn.id = PIN_BTN_ID;
+        btn.className = 'menu_button pg-pin-current';
+        btn.title = '置顶当前人设';
+        btn.innerHTML = '<i class="fa-solid fa-star"></i>';
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const cur = power_user.user_avatar;
+            if (!cur) {
+                console.warn('[' + EXT_NAME + '] 当前没有激活的人设。');
+                return;
+            }
+            togglePin(cur);
+            updatePinCurrentButton();
+            // 触发面板重排
+            state.page = 0;
+            reorganizeNative();
+            // 刷新快捷弹窗
+            refreshQuick();
         });
-        _sortableInstances.push(groupSortable);
-
-        // 2) 卡片排序
-        const bodies = block.querySelectorAll('.pg-group-body, .pg-ungrouped-wrapper');
-        bodies.forEach(body => {
-            const inst = Sortable.create(body, {
-                ...commonOpts,
-                group: { name: 'pg-personas', pull: true, put: true },
-                draggable: '.avatar-container',
-                handle: '.pg-drag-handle-avatar',
-                onEnd: () => {
-                    persistPersonaOrders(block);
-                    // ⭐ 优化：拖完后不再销毁重建 Sortable 实例，仅刷新手柄
-                    // Sortable 自己能识别新的 DOM 顺序，不需要重新 create
-                    // 但跨组拖动后，新容器内的卡片需要手柄 → 用 setTimeout 等 DOM 稳定再加
-                    setTimeout(() => {
-                        if (!state.sortMode) return;
-                        // 只补充缺失的手柄，不全量重建
-                        ensureDragHandles(block);
-                    }, 30);
-                },
-            });
-            _sortableInstances.push(inst);
-        });
-
-        console.log('[' + EXT_NAME + '] Sortable enabled (mobile=' + IS_MOBILE + ', instances=' + _sortableInstances.length + ')');
-    }).catch(err => {
-        console.error('[' + EXT_NAME + '] Failed to load Sortable:', err);
-    });
+        row.appendChild(btn);
+        updatePinCurrentButton();
+    };
+    tryInject();
 }
 
-/* ⭐ 优化：只补充缺失的手柄，不全量重建 */
-function ensureDragHandles(block) {
-    if (!state.sortMode) return;
-    block.querySelectorAll('.avatar-container').forEach(c => {
-        const avatarEl = c.querySelector('.avatar') || c.querySelector('img');
-        if (!avatarEl) return;
-        // 已经有手柄就跳过
-        if (avatarEl.querySelector('.pg-drag-handle-avatar')) return;
-        if (getComputedStyle(avatarEl).position === 'static') {
-            avatarEl.style.position = 'relative';
-        }
-        const handle = document.createElement('div');
-        handle.className = 'pg-drag-handle pg-drag-handle-avatar';
-        handle.addEventListener('click', e => { e.stopPropagation(); e.preventDefault(); });
-        avatarEl.appendChild(handle);
-    });
-}
-
-function disableSortable() {
-    while (_sortableInstances.length) {
-        const inst = _sortableInstances.pop();
-        try { inst.destroy(); } catch (e) {}
-    }
-    const block = document.getElementById('user_avatar_block');
-    if (block) block.classList.remove('pg-sort-mode');
-}
-
-function persistPersonaOrders(block) {
-    const groups = getGroups();
-    const groupMap = new Map(groups.map(g => [g.id, g]));
-
-    const allGroupBodies = block.querySelectorAll('.pg-group-body[data-gid]');
-    const newGroupPersonas = new Map();
-
-    allGroupBodies.forEach(body => {
-        const gid = body.dataset.gid;
-        if (!gid) return;
-        const ids = [];
-        Array.from(body.children).forEach(child => {
-            if (child.classList && child.classList.contains('avatar-container')) {
-                const id = getCardAvatarId(child);
-                if (id) ids.push(id);
-            }
-        });
-        newGroupPersonas.set(gid, ids);
-    });
-
-    const ung = block.querySelector(':scope > .pg-ungrouped-wrapper');
-    let newUngroupedOrder = null;
-    if (ung) {
-        const ids = [];
-        Array.from(ung.children).forEach(child => {
-            if (child.classList && child.classList.contains('avatar-container')) {
-                const id = getCardAvatarId(child);
-                if (id) ids.push(id);
-            }
-        });
-        newUngroupedOrder = ids;
-    }
-
-    let changed = false;
-    for (const g of groups) {
-        if (newGroupPersonas.has(g.id)) {
-            const newList = newGroupPersonas.get(g.id);
-            if (newList.length === 0 && g.personas.length > 0) {
-                console.warn('[' + EXT_NAME + '] 检测到分组 "' + g.name + '" DOM 收集为空但原本非空，跳过该分组的持久化');
-                continue;
-            }
-            if (JSON.stringify(g.personas) !== JSON.stringify(newList)) {
-                g.personas = newList;
-                changed = true;
-            }
-        }
-    }
-
-    if (newUngroupedOrder !== null) {
-        setUngroupedOrder(newUngroupedOrder);
-        changed = true;
-    }
-
-    if (changed) saveGroups();
+function updatePinCurrentButton() {
+    const btn = document.getElementById(PIN_BTN_ID);
+    if (!btn) return;
+    const cur = power_user.user_avatar;
+    const pinned = cur && isPinned(cur);
+    btn.classList.toggle('pg-pinned', !!pinned);
+    btn.title = pinned ? '取消置顶' : '置顶当前人设';
 }
 
 // ========== 位置2：快捷弹窗 ==========
@@ -1393,21 +1184,24 @@ function isCurrent(a) {
 function renderQuick() {
     const p = document.getElementById(POPUP_ID);
     if (!p) return;
-    const all = getAllAvatars();
+    const allOriginal = getAllAvatars();
     const grouped = new Set();
     let h = '<div class="pg-quick-header">切换人设</div>';
     for (const g of getGroups()) {
-        const ps = g.personas.filter(a => all.includes(a));
+        const ps = g.personas.filter(a => allOriginal.includes(a));
         ps.forEach(a => grouped.add(a));
         if (ps.length === 0) continue;
+        // 组内：置顶在前
+        const sorted = sortByPinned(ps);
         h += '<div class="pg-quick-group' + (g.collapsed?' pg-collapsed':'') + '" data-gid="' + g.id + '">';
         h += '<div class="pg-quick-group-header"><i class="fa-solid fa-chevron-down"></i><span>' + esc(g.name) + '</span><span class="pg-quick-count">' + ps.length + '</span></div>';
         h += '<div class="pg-quick-grid">';
-        for (const a of ps) h += renderQuickAv(a);
+        for (const a of sorted) h += renderQuickAv(a);
         h += '</div></div>';
     }
-    let ung = all.filter(a => !grouped.has(a));
-    ung = applyUngroupedOrder(ung);
+    let ung = allOriginal.filter(a => !grouped.has(a));
+    // 未分组：置顶在前，其余按原始顺序
+    ung = sortByPinned(ung, allOriginal);
     if (ung.length > 0) {
         h += '<div class="pg-quick-ungrouped"><div class="pg-quick-grid">';
         for (const a of ung) h += renderQuickAv(a);
@@ -1423,6 +1217,7 @@ function renderQuick() {
         this.classList.add('pg-current');
         await switchPersona(a);
         setTimeout(updateQuickBtnAvatar, 50);
+        setTimeout(updatePinCurrentButton, 100);
         closeQuick();
     });
     window.jQuery(p).find('.pg-quick-group-header').on('click', async function (e) {
@@ -1439,12 +1234,13 @@ function renderQuickAv(a) {
     const name = getName(a);
     const titleNote = getPersonaTitle(a);
     const tooltip = titleNote ? (name + '\n' + titleNote) : name;
-    return '<div class="pg-quick-avatar' + (isCurrent(a)?' pg-current':'') + '" data-avatar="' + esc(a) + '" title="' + esc(tooltip) + '"><img src="' + getAvatarUrl(a) + '"></div>';
+    const pinnedCls = isPinned(a) ? ' pg-quick-pinned' : '';
+    return '<div class="pg-quick-avatar' + (isCurrent(a)?' pg-current':'') + pinnedCls + '" data-avatar="' + esc(a) + '" title="' + esc(tooltip) + '"><img src="' + getAvatarUrl(a) + '"></div>';
 }
 
 // ========== 入口 ==========
 jQuery(async () => {
-    console.log('[' + EXT_NAME + '] Loading... (mobile=' + IS_MOBILE + ')');
+    console.log('[' + EXT_NAME + '] Loading...');
     initStorage();
     await loadPersonaApi();
     loadPopper();
@@ -1469,6 +1265,7 @@ jQuery(async () => {
         await refreshValidAvatars();
         try { refreshMain(); } catch(e){}
         try { refreshQuick(); } catch(e){}
+        try { updatePinCurrentButton(); } catch(e){}
     };
     if (eventSource && event_types) {
         if (event_types.SETTINGS_UPDATED) eventSource.on(event_types.SETTINGS_UPDATED, refreshAll);
@@ -1479,10 +1276,22 @@ jQuery(async () => {
     if (obs) {
         new MutationObserver(() => {
             if (isReorganizing) return;
-            if (state.sortMode) return;
             clearTimeout(window.__pg_reorg_timer);
             window.__pg_reorg_timer = setTimeout(reorganizeNative, 100);
         }).observe(obs, { childList: true, subtree: false });
+    }
+
+    // 监听激活栏可能的重建（酒馆切换页面时可能重建）
+    const personaPanel = document.getElementById('PersonaManagement') || document.body;
+    if (personaPanel) {
+        new MutationObserver(() => {
+            if (!document.getElementById(PIN_BTN_ID)) {
+                injectPinCurrentButton._retry = 0;
+                injectPinCurrentButton();
+            } else {
+                updatePinCurrentButton();
+            }
+        }).observe(personaPanel, { childList: true, subtree: true });
     }
 
     window.addEventListener('resize', () => {
