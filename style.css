@@ -1,5 +1,3 @@
-废案 拖动排序 差删除分组后人设到末尾
-
 /* ====== 工具栏（位置1顶部）====== */
 .pg-toolbar-container {
     display: flex;
@@ -35,8 +33,7 @@
     padding: 4px 8px;
 }
 .pg-btn-selectmode.pg-active,
-.pg-btn-toggle-groups.pg-active,
-.pg-btn-sortmode.pg-active {
+.pg-btn-toggle-groups.pg-active {
     background: var(--SmartThemeQuoteColor) !important;
 }
 
@@ -271,6 +268,45 @@
     border-radius: 4px;
 }
 
+/* ====== 置顶星标 ====== */
+/* 已置顶卡片：右上角金色星 */
+.avatar-container {
+    position: relative;
+}
+.pg-pin-mark {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 4;
+    color: #f5b300;
+    font-size: 14px;
+    pointer-events: none;
+    text-shadow: 0 0 2px rgba(0,0,0,0.4);
+}
+
+/* 如果卡片有备注 (.ch_additional_info)，备注右侧腾出 18px 给星标 */
+.avatar-container.pg-pinned-card .ch_additional_info {
+    padding-right: 18px;
+}
+
+/* 激活栏的置顶按钮 */
+#pg-pin-current-btn {
+    cursor: pointer;
+}
+#pg-pin-current-btn i {
+    color: var(--SmartThemeBodyColor);
+    opacity: 0.7;
+    transition: color 0.15s, opacity 0.15s;
+}
+#pg-pin-current-btn:hover i {
+    opacity: 1;
+    color: #f5b300;
+}
+#pg-pin-current-btn.pg-pinned i {
+    color: #f5b300;
+    opacity: 1;
+}
+
 /* ====== 快捷按钮（位置2）====== */
 #pg-quick-btn {
     position: relative;
@@ -370,6 +406,7 @@ body.square-avatars #pg-quick-btn .pg-quick-btn-img {
     transition: transform 0.15s, box-shadow 0.15s;
     border: 2px solid transparent;
     box-sizing: border-box;
+    position: relative;
 }
 body.square-avatars .pg-quick-avatar { border-radius: 2px; }
 .pg-quick-avatar img {
@@ -383,6 +420,20 @@ body.square-avatars .pg-quick-avatar { border-radius: 2px; }
     box-shadow: 0 0 8px var(--SmartThemeQuoteColor);
 }
 .pg-quick-avatar.pg-current { border-color: var(--SmartThemeQuoteColor); }
+
+/* 快捷弹窗内的置顶星标（右上角小一号） */
+.pg-quick-avatar.pg-quick-pinned::after {
+    content: '\f005';
+    font-family: 'Font Awesome 6 Free';
+    font-weight: 900;
+    position: absolute;
+    top: 1px;
+    right: 1px;
+    color: #f5b300;
+    font-size: 9px;
+    text-shadow: 0 0 2px rgba(0,0,0,0.6);
+    pointer-events: none;
+}
 
 @media (max-width: 768px) {
     .pg-quick-popup {
@@ -423,122 +474,4 @@ body.square-avatars .pg-quick-avatar { border-radius: 2px; }
     margin-top: 4px;
     font-size: 0.85em;
     line-height: 1.4;
-}
-
-/* ====== 排序模式 ====== */
-.pg-sort-hint {
-    display: flex;
-    align-items: center;
-    padding: 6px 10px;
-    background: var(--black30a);
-    border: 1px dashed var(--SmartThemeQuoteColor);
-    border-radius: 6px;
-    font-size: 0.85em;
-    opacity: 0.95;
-}
-.pg-sort-hint .menu_button {
-    margin: 0;
-    padding: 3px 10px;
-    min-width: 56px;
-}
-
-/* 拖拽手柄：只覆盖头像区域 */
-.pg-drag-handle-avatar {
-    position: absolute !important;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    width: 100%;
-    height: 100%;
-    z-index: 50;
-    cursor: grab;
-    background: transparent;
-    touch-action: none;
-    -webkit-touch-callout: none;
-    -webkit-user-select: none;
-    user-select: none;
-    border-radius: inherit;
-}
-.pg-drag-handle-avatar:active {
-    cursor: grabbing;
-}
-
-/* ⭐ PC 端：头像虚线高亮（视觉提示） */
-#user_avatar_block.pg-sort-mode .avatar-container .avatar,
-#user_avatar_block.pg-sort-mode .avatar-container > img {
-    outline: 2px dashed var(--SmartThemeQuoteColor);
-    outline-offset: 2px;
-    border-radius: 4px;
-}
-
-/* ⭐ 移动端：去掉虚线，改用更轻量的 box-shadow（GPU 友好） */
-@media (max-width: 768px) {
-    #user_avatar_block.pg-sort-mode .avatar-container .avatar,
-    #user_avatar_block.pg-sort-mode .avatar-container > img {
-        outline: none;
-        box-shadow: 0 0 0 2px var(--SmartThemeQuoteColor);
-        border-radius: 4px;
-    }
-}
-
-/* ⭐ 移动端拖拽性能：提示浏览器使用 GPU 合成层 */
-@media (max-width: 768px) {
-    #user_avatar_block.pg-sort-mode .avatar-container {
-        will-change: transform;
-        transform: translateZ(0);
-    }
-}
-
-/* 排序模式下：分组 header 整体作为拖动把手 */
-#user_avatar_block.pg-sort-mode .pg-group-header {
-    cursor: grab;
-}
-#user_avatar_block.pg-sort-mode .pg-group-header:active {
-    cursor: grabbing;
-}
-#user_avatar_block.pg-sort-mode .pg-group-actions i {
-    cursor: pointer;
-}
-
-/* 未分组容器 */
-.pg-ungrouped-wrapper {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    padding: 8px 0;
-    width: 100%;
-    grid-column: 1 / -1;
-}
-#user_avatar_block.gridView .pg-ungrouped-wrapper {
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: 5px;
-}
-
-/* SortableJS 拖拽视觉反馈 */
-.sortable-ghost {
-    opacity: 0.35;
-    background: var(--SmartThemeQuoteColor) !important;
-}
-.sortable-chosen {
-    outline: 2px solid var(--SmartThemeQuoteColor);
-    outline-offset: -2px;
-    border-radius: 4px;
-}
-.sortable-drag {
-    opacity: 0.85;
-}
-
-/* ⭐ 移动端拖拽视觉反馈轻量化 */
-@media (max-width: 768px) {
-    .sortable-ghost {
-        opacity: 0.4;
-        background: transparent !important;
-        box-shadow: inset 0 0 0 2px var(--SmartThemeQuoteColor);
-    }
-    .sortable-drag {
-        opacity: 0.9;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    }
 }
